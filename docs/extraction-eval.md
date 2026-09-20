@@ -22,6 +22,36 @@ signal, not a release gate.** §22 sets a provisional target of 99.5% precision 
 events on a representative held-out set; this corpus is nowhere near large enough to support that
 claim, and nothing auto-posts today.
 
+## Rules before models
+
+buildspec.md §7.1 puts deterministic parsing first, and on this hardware that is not a stylistic
+preference — it is what makes ingestion usable at all.
+
+`src/extraction/templates.ts` run over the same 14 fixtures:
+
+| | Rules | Ollama `qwen3.5:2b` | llama.cpp `qwen3.5-0.8b` |
+|---|---|---|---|
+| `event_type` | **13/14** | 13/14 | 11/14 |
+| Amount exact | 10/11 | 10/11 (parses) | 10/11 (parses) |
+| Settled with no model call | **13/14** | — | — |
+| Time for all 14 | **6.1 ms** | ~34 s | ~5.5 min |
+| Works offline | **yes** | no (LAN) | yes (on-phone) |
+
+The rules match the best model's classification accuracy and run roughly **5,000 times faster**,
+with no network and no queue. The model's job is the remainder.
+
+The one deferral is `sms_atm_withdrawal_with_fee`, which states a withdrawal *and* a fee. The rules
+find two transactional amounts, decline to guess which is which, and hand it on — which is the
+behaviour §8 asks for ("One email can contain several payment lines"), not a failure.
+
+What the rules will not do: guess. A field is either read from literal text in the message or left
+null, and a result missing anything a ledger entry needs is passed to the model rather than
+completed by inference. `needsModel()` returns false only for a complete result, or for a
+classification that provably involves no money (OTP, promotion, declined).
+
+Every pattern is linear with bounded repetition, and a test feeds the parser 20,000-character
+hostile inputs to prove it cannot be made to hang (§7.1, §20).
+
 ## Model comparison
 
 Same prompt (`qwen-extract-v3`), same 14 fixtures, same 1024-token budget.
