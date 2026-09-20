@@ -278,10 +278,10 @@ export type CreateExpenseInput = {
   readonly merchantId?: string | undefined;
   readonly merchantName?: string | undefined;
   readonly notes?: string | undefined;
-  readonly accountingScope?: AccountingScope;
-  readonly actor?: Actor;
-  readonly origin?: string;
-  readonly reason?: string;
+  readonly accountingScope?: AccountingScope | undefined;
+  readonly actor?: Actor | undefined;
+  readonly origin?: string | undefined;
+  readonly reason?: string | undefined;
 };
 
 /**
@@ -370,9 +370,9 @@ export type CreateTransferInput = {
    */
   readonly fee?: { readonly amount: Money; readonly categoryId: string } | undefined;
   readonly notes?: string | undefined;
-  readonly actor?: Actor;
-  readonly origin?: string;
-  readonly reason?: string;
+  readonly actor?: Actor | undefined;
+  readonly origin?: string | undefined;
+  readonly reason?: string | undefined;
 };
 
 /**
@@ -453,9 +453,9 @@ export type CreateRefundInput = {
   readonly merchantId?: string | undefined;
   readonly merchantName?: string | undefined;
   readonly notes?: string | undefined;
-  readonly actor?: Actor;
-  readonly origin?: string;
-  readonly reason?: string;
+  readonly actor?: Actor | undefined;
+  readonly origin?: string | undefined;
+  readonly reason?: string | undefined;
 };
 
 /**
@@ -494,9 +494,9 @@ export type OpeningBalanceInput = {
   readonly amount: Money;
   readonly occurredAt: FinancialTime;
   readonly notes?: string | undefined;
-  readonly actor?: Actor;
-  readonly origin?: string;
-  readonly reason?: string;
+  readonly actor?: Actor | undefined;
+  readonly origin?: string | undefined;
+  readonly reason?: string | undefined;
 };
 
 /**
@@ -551,9 +551,9 @@ export type UnknownAdjustmentInput = {
   readonly displayDelta: Money;
   readonly occurredAt: FinancialTime;
   readonly notes?: string | undefined;
-  readonly actor?: Actor;
-  readonly origin?: string;
-  readonly reason?: string;
+  readonly actor?: Actor | undefined;
+  readonly origin?: string | undefined;
+  readonly reason?: string | undefined;
 };
 
 /**
@@ -728,12 +728,12 @@ export type EditFinancialsInput = {
   readonly merchantName?: string | undefined;
   readonly categoryId?: string | undefined;
   readonly notes?: string | undefined;
-  readonly manualOverrideFields?: readonly string[];
+  readonly manualOverrideFields?: readonly string[] | undefined;
   /** buildspec.md §16: financial writes check the expected record revision. */
   readonly expectedRevision: number;
-  readonly actor?: Actor;
-  readonly origin?: string;
-  readonly reason?: string;
+  readonly actor?: Actor | undefined;
+  readonly origin?: string | undefined;
+  readonly reason?: string | undefined;
 };
 
 /**
@@ -819,9 +819,9 @@ export function planEditFinancials(
 export type DeleteTransactionInput = {
   readonly snapshot: TransactionSnapshot;
   readonly expectedRevision: number;
-  readonly actor?: Actor;
-  readonly origin?: string;
-  readonly reason?: string;
+  readonly actor?: Actor | undefined;
+  readonly origin?: string | undefined;
+  readonly reason?: string | undefined;
 };
 
 /**
@@ -894,9 +894,9 @@ export type RestoreTransactionInput = {
   /** The journal that the deletion reversed, so its effect can be re-applied. */
   readonly reversedJournal: Journal;
   readonly expectedRevision: number;
-  readonly actor?: Actor;
-  readonly origin?: string;
-  readonly reason?: string;
+  readonly actor?: Actor | undefined;
+  readonly origin?: string | undefined;
+  readonly reason?: string | undefined;
 };
 
 /**
