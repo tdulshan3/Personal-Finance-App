@@ -161,7 +161,7 @@ export function SmsCard({ overview, webhookUrl }: { overview: SmsOverview; webho
                   minLength={16}
                   autoComplete="off"
                   spellCheck={false}
-                  placeholder="8cd94f7b…"
+                  placeholder="Paste the secret shown in the app"
                   describedBy={describedBy}
                 />
               )}
