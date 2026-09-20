@@ -102,6 +102,56 @@ export function generateWebhookSecret(db: Db, now: number): WebhookConfig {
   return config;
 }
 
+/**
+ * Adopts a secret the owner already has.
+ *
+ * The collector app can generate its own signing key, and when it has, forcing a server-generated
+ * one just means retyping a long string into a phone for no benefit. The key is only ever used as
+ * HMAC input, so any bytes work; what matters is that both sides hold the same value and that it
+ * has enough entropy to be worth signing with.
+ *
+ * 16 characters is the floor. Below that an attacker on the LAN could search the space faster than
+ * they could read the traffic, which would make the signature decorative.
+ */
+export function setWebhookSecret(db: Db, secret: string, now: number): WebhookConfig {
+  const trimmed = secret.trim();
+  if (trimmed.length < 16) {
+    throw validationError(
+      `A signing secret needs at least 16 characters; that one has ${trimmed.length}. ` +
+        `Use the one the collector app generated, or generate a new one here.`,
+    );
+  }
+  if (trimmed.length > 512) throw validationError("That secret is implausibly long");
+  if (/\s/.test(trimmed)) {
+    // A pasted value with a stray space signs differently on each side, and the only symptom is
+    // a 401 that looks like the wrong secret entirely.
+    throw validationError("A signing secret must not contain spaces or line breaks");
+  }
+
+  const existing = readWebhookConfig(db);
+  const config: WebhookConfig = {
+    enabled: true,
+    secret: trimmed,
+    createdAt: now,
+    ...(existing?.lastDeliveryAt === undefined ? {} : { lastDeliveryAt: existing.lastDeliveryAt }),
+    ...(existing?.lastSender === undefined ? {} : { lastSender: existing.lastSender }),
+  };
+  writeWebhookConfig(db, config, now);
+  return config;
+}
+
+/**
+ * True when a secret is short enough to be worth a warning, while still being usable.
+ *
+ * The threshold is 32 characters because that is roughly 128 bits for a hex value — the point below
+ * which searching the key space starts to compete with simply reading the unencrypted traffic. The
+ * collector app's own 32-character default sits exactly on it and is fine; this is not a nudge to
+ * replace it.
+ */
+export function isWeakSecret(secret: string): boolean {
+  return secret.trim().length < 32;
+}
+
 export function setWebhookEnabled(db: Db, enabled: boolean, now: number): WebhookConfig {
   const existing = readWebhookConfig(db);
   if (!existing) throw validationError("Generate a webhook secret first");

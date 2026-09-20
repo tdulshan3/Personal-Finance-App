@@ -13,7 +13,9 @@ import {
   occurrenceId,
   parseWebhookPayload,
   readWebhookConfig,
+  isWeakSecret,
   setWebhookEnabled,
+  setWebhookSecret,
   stageWebhookMessage,
   verifySignature,
 } from "./webhook.ts";
@@ -289,6 +291,63 @@ describe("staging a delivery", () => {
     }
     const conns = db.prepare("SELECT COUNT(*) AS n FROM source_connections").get() as Record<string, unknown>;
     assert.equal(Number(conns.n), 1);
+    db.close();
+  });
+});
+
+describe("adopting a secret the collector already has", () => {
+  test("a pasted secret is used verbatim, so both sides sign the same way", async () => {
+    const db = await freshDb();
+    // 32 hex characters: what the collector app generates.
+    const theirs = "8cd94f7b19a28389dbca53008f7fd1d4";
+    const config = setWebhookSecret(db, theirs, Date.now());
+
+    assert.equal(config.secret, theirs);
+    assert.equal(config.enabled, true);
+
+    const body = JSON.stringify(PAYLOAD);
+    assert.equal(verifySignature(body, sign(body, theirs), config.secret), true);
+    db.close();
+  });
+
+  // A pasted value with a stray space signs differently on each side, and the only symptom is a
+  // 401 that looks like the wrong secret entirely.
+  test("surrounding whitespace is trimmed, inner whitespace is refused", async () => {
+    const db = await freshDb();
+    const theirs = "8cd94f7b19a28389dbca53008f7fd1d4";
+    assert.equal(setWebhookSecret(db, `  ${theirs}  `, Date.now()).secret, theirs);
+    assert.throws(() => setWebhookSecret(db, "8cd94f7b 19a28389dbca53008f7fd1d4", Date.now()),
+                  /must not contain spaces/);
+    db.close();
+  });
+
+  test("a secret too short to be worth signing with is refused", async () => {
+    const db = await freshDb();
+    assert.throws(() => setWebhookSecret(db, "short", Date.now()), /at least 16 characters/);
+    assert.throws(() => setWebhookSecret(db, "x".repeat(15), Date.now()), /at least 16 characters/);
+    assert.equal(setWebhookSecret(db, "x".repeat(16), Date.now()).secret.length, 16);
+    db.close();
+  });
+
+  /*
+   * 32 hex characters is 128 bits, which is a perfectly good HMAC key -- the collector app's
+   * default is not a weakness. The warning is for values below that, where the search space starts
+   * to matter more than the traffic being readable.
+   */
+  test("128 bits is not flagged; less than that is", () => {
+    assert.equal(isWeakSecret("8cd94f7b19a28389dbca53008f7fd1d4"), false, "32 hex chars = 128 bits");
+    assert.equal(isWeakSecret("a".repeat(64)), false, "64 chars, as generated here");
+    assert.equal(isWeakSecret("a".repeat(20)), true, "20 chars");
+  });
+
+  test("adopting one replaces whatever was there", async () => {
+    const db = await freshDb();
+    const generated = generateWebhookSecret(db, Date.now());
+    const adopted = setWebhookSecret(db, "8cd94f7b19a28389dbca53008f7fd1d4", Date.now());
+    assert.notEqual(adopted.secret, generated.secret);
+
+    const body = JSON.stringify(PAYLOAD);
+    assert.equal(verifySignature(body, sign(body, generated.secret), adopted.secret), false);
     db.close();
   });
 });

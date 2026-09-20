@@ -7,8 +7,10 @@ import { asBoolean, asNumber, asText } from "../../core/data/driver.ts";
 import { isFinanceError } from "../../core/domain/errors.ts";
 import {
   generateWebhookSecret,
+  isWeakSecret,
   readWebhookConfig,
   setWebhookEnabled,
+  setWebhookSecret,
   WEBHOOK_CONNECTION_DEVICE,
 } from "../../ingestion/sms/webhook.ts";
 import { requireDb } from "../../server/runtime.ts";
@@ -56,6 +58,26 @@ export async function generateSecretAction(
     return {
       ok: "New secret generated. Copy it into the collector app now — it is not shown again.",
       secret: config.secret,
+    };
+  } catch (error) {
+    return { error: describe(error) };
+  }
+}
+
+/** Adopts a secret the collector app already generated, instead of minting a new one. */
+export async function useOwnSecretAction(
+  _prev: SmsSettingsState,
+  formData: FormData,
+): Promise<SmsSettingsState> {
+  try {
+    const supplied = String(formData.get("secret") ?? "");
+    setWebhookSecret(await db(), supplied, Date.now());
+    revalidatePath("/settings");
+    return {
+      ok: isWeakSecret(supplied)
+        ? "Saved, but it is short. Under about 128 bits the signature stops being worth much — " +
+          "consider generating one here instead."
+        : "Saved. The collector must sign with exactly this value.",
     };
   } catch (error) {
     return { error: describe(error) };

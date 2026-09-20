@@ -3,9 +3,14 @@
 import { useActionState, useState } from "react";
 
 import { Badge, Card, ErrorNote, InfoNote } from "../../ui/primitives.tsx";
-import { Button, SubmitButton } from "../../ui/form.tsx";
+import { Button, Field, SubmitButton, TextInput } from "../../ui/form.tsx";
 import type { SmsOverview, SmsSettingsState } from "./sms-actions.ts";
-import { generateSecretAction, toggleSenderAction, toggleWebhookAction } from "./sms-actions.ts";
+import {
+  generateSecretAction,
+  toggleSenderAction,
+  toggleWebhookAction,
+  useOwnSecretAction,
+} from "./sms-actions.ts";
 
 /**
  * SMS capture setup.
@@ -25,7 +30,9 @@ export function SmsCard({ overview, webhookUrl }: { overview: SmsOverview; webho
     toggleWebhookAction,
     {},
   );
+  const [ownState, runOwn] = useActionState<SmsSettingsState, FormData>(useOwnSecretAction, {});
   const [copied, setCopied] = useState<string | null>(null);
+  const [showOwn, setShowOwn] = useState(false);
 
   const copy = async (label: string, value: string) => {
     try {
@@ -135,6 +142,51 @@ export function SmsCard({ overview, webhookUrl }: { overview: SmsOverview; webho
           </span>
         ) : null}
         {secretState.error ? <ErrorNote>{secretState.error}</ErrorNote> : null}
+
+        {/*
+          The collector app can generate its own key. When it has, forcing a server-generated one
+          just means retyping 64 characters into a phone for no benefit.
+        */}
+        {showOwn ? (
+          <form action={runOwn} style={{ marginTop: "var(--space-3)" }}>
+            <Field
+              label="Paste the secret the collector app generated"
+              hint="At least 16 characters, no spaces. Both sides must hold exactly the same value."
+            >
+              {({ id, describedBy }) => (
+                <TextInput
+                  id={id}
+                  name="secret"
+                  required
+                  minLength={16}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="8cd94f7b…"
+                  describedBy={describedBy}
+                />
+              )}
+            </Field>
+            <div style={{ marginTop: "var(--space-3)" }}>
+              <SubmitButton pendingLabel="Saving…">Use this secret</SubmitButton>
+            </div>
+          </form>
+        ) : (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setShowOwn(true)}
+            style={{ justifySelf: "start", padding: 0, minHeight: "32px" }}
+          >
+            Or paste one the app already generated
+          </Button>
+        )}
+
+        {ownState.error ? <ErrorNote>{ownState.error}</ErrorNote> : null}
+        {ownState.ok ? (
+          <p role="status" style={{ fontSize: "var(--font-sm)", color: "var(--success)" }}>
+            {ownState.ok}
+          </p>
+        ) : null}
       </div>
 
       {/* Step 3 — consent, per sender. */}
