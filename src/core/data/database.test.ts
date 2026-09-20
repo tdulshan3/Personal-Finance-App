@@ -134,11 +134,11 @@ describe("migrations", () => {
     const db = await openEncryptedDatabase({ file, key });
 
     const first = migrate(db);
-    assert.deepEqual(first.appliedVersions, [1, 2]);
+    assert.deepEqual(first.appliedVersions, [1, 2, 3]);
 
     const second = migrate(db);
     assert.deepEqual(second.appliedVersions, [], "re-running applies nothing");
-    assert.equal(second.currentVersion, 2);
+    assert.equal(second.currentVersion, 3);
     db.close();
   });
 
