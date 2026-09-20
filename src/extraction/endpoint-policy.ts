@@ -674,7 +674,6 @@ export async function requestJson(
   const onOuterAbort = (): void => controller.abort(options.signal?.reason);
   options.signal?.addEventListener("abort", onOuterAbort, { once: true });
   const deadlineTimer = setTimeout(() => controller.abort(new Error("deadline")), deadlineMs);
-  if (typeof deadlineTimer === "object" && "unref" in deadlineTimer) deadlineTimer.unref();
 
   const started = Date.now();
   try {
@@ -790,7 +789,6 @@ async function readCapped(
             ),
           idleTimeoutMs,
         );
-        if (typeof timer === "object" && "unref" in timer) timer.unref();
       });
 
       let chunk: ReadableStreamReadResult<Uint8Array>;

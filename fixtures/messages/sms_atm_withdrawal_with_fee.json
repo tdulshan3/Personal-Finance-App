@@ -1,0 +1,48 @@
+{
+  "id": "sms_atm_withdrawal_with_fee",
+  "language": "en",
+  "channel": "sms",
+  "sender": "BlueLagoon Bank (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "ATM cash withdrawal LKR 4,000.00 from account ****6620 at KANDY CITY ATM on 19/09/2026. Service fee LKR 250.00. Available balance LKR 76,911.30.",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_atm_withdrawal",
+    "events": [
+      {
+        "event_type": "transfer",
+        "amount_text": "4,000.00",
+        "currency": "LKR",
+        "merchant_text": "KANDY CITY ATM",
+        "account_suffix": "6620",
+        "occurred_at_text": "19/09/2026",
+        "reference_text": null,
+        "balance_text": "76,911.30",
+        "balance_type": "available",
+        "evidence": {
+          "amount": "ATM cash withdrawal LKR 4,000.00",
+          "merchant": "at KANDY CITY ATM",
+          "account": "account ****6620",
+          "balance": "Available balance LKR 76,911.30"
+        }
+      },
+      {
+        "event_type": "fee",
+        "amount_text": "250.00",
+        "currency": "LKR",
+        "merchant_text": null,
+        "account_suffix": "6620",
+        "occurred_at_text": "19/09/2026",
+        "reference_text": null,
+        "balance_text": null,
+        "balance_type": null,
+        "evidence": {
+          "amount": "Service fee LKR 250.00",
+          "account": "account ****6620"
+        }
+      }
+    ]
+  },
+  "notes": "buildspec.md §22 fixture 'bank→cash 4,000; fee 250': only the fee is spending; the withdrawal is a transfer. One message, two events (§1.5).",
+  "synthetic": true
+}

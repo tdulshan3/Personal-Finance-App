@@ -1,0 +1,54 @@
+{
+  "id": "sms_posted_purchase_keells",
+  "language": "en",
+  "channel": "sms",
+  "sender": "BlueLagoon Bank (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "Purchase of LKR 3,450.00 at KEELLS SUPER using card ****1234 on 20/09/2026. Available balance LKR 52,340.20.",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_keells_purchase",
+    "events": [
+      {
+        "event_type": "posted_expense",
+        "amount_text": "3,450.00",
+        "currency": "LKR",
+        "merchant_text": "KEELLS SUPER",
+        "account_suffix": "1234",
+        "occurred_at_text": "20/09/2026",
+        "reference_text": null,
+        "balance_text": "52,340.20",
+        "balance_type": "available",
+        "evidence": {
+          "amount": "Purchase of LKR 3,450.00",
+          "merchant": "at KEELLS SUPER",
+          "account": "card ****1234"
+        }
+      }
+    ]
+  },
+  "spec_example": {
+    "schema_version": 1,
+    "source_id": "src_demo_1",
+    "events": [
+      {
+        "event_type": "posted_expense",
+        "amount_text": "3,450.00",
+        "currency": "LKR",
+        "merchant_text": "KEELLS SUPER",
+        "account_suffix": "1234",
+        "occurred_at_text": "20/09/2026",
+        "reference_text": null,
+        "balance_text": "52,340.20",
+        "balance_type": "available",
+        "evidence": {
+          "amount": "Purchase of LKR 3,450.00",
+          "merchant": "at KEELLS SUPER",
+          "account": "card ****1234"
+        }
+      }
+    ]
+  },
+  "notes": "buildspec.md §7.3 worked example. `spec_example` is the specification's JSON verbatim; `expected` is the same content with the caller's own source_id, which §7.3 requires the model to echo exactly. The available balance is stored as an observation, not as the ledger balance (§10).",
+  "synthetic": true
+}

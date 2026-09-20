@@ -36,8 +36,12 @@ types.
 - **KDF:** `scrypt` from Node's built-in `node:crypto`. No native Argon2 dependency — every extra
   native module is another thing that has to compile on the phone against bionic
   ([ADR 0002](0002-build-on-pc-deploy-standalone-to-phone.md)). scrypt is memory-hard, is in the
-  standard library, and its parameters (`N`, `r`, `p`) are stored alongside a random per-install
-  salt so they can be raised later without invalidating existing databases.
+  standard library, and its parameters are stored alongside a random per-install salt so they can be
+  raised later without invalidating existing databases.
+  Version 1 uses `N = 2^16`, `r = 8`, `p = 1`, a 32-byte key and a 16-byte random salt — roughly
+  64 MiB and about a second of work. Unlocking happens once per server start, not per request, so
+  the cost falls on an attacker guessing passphrases rather than on the owner.
+  *The timing figure is an estimate; it has not been measured on the S20.*
 - **The server starts locked.** `node server.js` comes up with no key and no open database. Every
   route that touches finance data returns "locked" until the owner unlocks.
 - **The key is held in memory only**, for the lifetime of the server process. It is never written to

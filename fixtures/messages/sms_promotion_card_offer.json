@@ -1,0 +1,30 @@
+{
+  "id": "sms_promotion_card_offer",
+  "language": "en",
+  "channel": "sms",
+  "sender": "BlueLagoon Cards (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "Flash offer! Get 15% off up to LKR 2,000.00 on your BlueLagoon credit card at SERENDIB ELECTRONICS until 30/09/2026. T&C apply. Reply STOP to opt out.",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_promotion_serendib",
+    "events": [
+      {
+        "event_type": "promotion",
+        "amount_text": null,
+        "currency": null,
+        "merchant_text": "SERENDIB ELECTRONICS",
+        "account_suffix": null,
+        "occurred_at_text": null,
+        "reference_text": null,
+        "balance_text": null,
+        "balance_type": null,
+        "evidence": {
+          "merchant": "at SERENDIB ELECTRONICS"
+        }
+      }
+    ]
+  },
+  "notes": "The LKR 2,000.00 is a discount cap, not a transaction. Returning it as amount_text would be a false financial fact, so the expected extraction leaves the amount null.",
+  "synthetic": true
+}

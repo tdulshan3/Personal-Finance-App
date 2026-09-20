@@ -1,0 +1,34 @@
+{
+  "id": "sms_sinhala_posted_purchase",
+  "language": "si",
+  "channel": "sms",
+  "sender": "BlueLagoon Bank (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "ඔබගේ ගිණුම ****4421 වෙතින් 2026/09/16 දින SATHOSA හිදී රු. 2,780.00 ක් ගෙවා ඇත. ශේෂය රු. 41,225.50.",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_sinhala_sathosa",
+    "events": [
+      {
+        "event_type": "posted_expense",
+        "amount_text": "2,780.00",
+        "currency": "LKR",
+        "merchant_text": "SATHOSA",
+        "account_suffix": "4421",
+        "occurred_at_text": "2026/09/16",
+        "reference_text": null,
+        "balance_text": "41,225.50",
+        "balance_type": "unknown",
+        "evidence": {
+          "amount": "රු. 2,780.00",
+          "merchant": "SATHOSA",
+          "account": "****4421",
+          "date": "2026/09/16",
+          "balance": "ශේෂය රු. 41,225.50"
+        }
+      }
+    ]
+  },
+  "notes": "Invented Sinhala SMS. The message writes the currency as 'රු.'; the ISO code is derived by application code, so `currency` is not required to appear literally in the source. The bare word 'ශේෂය' (balance) does not say which kind of balance it is, so balance_type is 'unknown' (§10).",
+  "synthetic": true
+}

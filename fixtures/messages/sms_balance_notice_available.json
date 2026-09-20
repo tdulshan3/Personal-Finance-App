@@ -1,0 +1,32 @@
+{
+  "id": "sms_balance_notice_available",
+  "language": "en",
+  "channel": "sms",
+  "sender": "BlueLagoon Bank (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "Dear Customer, the available balance of your BlueLagoon Bank account ****6620 as at 2026-09-19 21:45 is LKR 118,004.55. Thank you for banking with us.",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_balance_notice",
+    "events": [
+      {
+        "event_type": "balance_notice",
+        "amount_text": null,
+        "currency": "LKR",
+        "merchant_text": null,
+        "account_suffix": "6620",
+        "occurred_at_text": "2026-09-19 21:45",
+        "reference_text": null,
+        "balance_text": "118,004.55",
+        "balance_type": "available",
+        "evidence": {
+          "account": "account ****6620",
+          "date": "as at 2026-09-19 21:45",
+          "balance": "is LKR 118,004.55"
+        }
+      }
+    ]
+  },
+  "notes": "buildspec.md §7.1: an amount near 'available balance' is not a purchase amount. No transaction amount is returned at all.",
+  "synthetic": true
+}

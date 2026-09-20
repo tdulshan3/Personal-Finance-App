@@ -1,0 +1,30 @@
+{
+  "id": "sms_sinhala_otp",
+  "language": "si",
+  "channel": "sms",
+  "sender": "NimbusPay (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "ඔබගේ OTP කේතය 730164 වේ. මෙය කිසිවෙකුට ලබා නොදෙන්න. NIMBUS PAY ගෙවීම සඳහා මිනිත්තු 5ක් වලංගු වේ.",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_sinhala_otp",
+    "events": [
+      {
+        "event_type": "otp",
+        "amount_text": null,
+        "currency": null,
+        "merchant_text": "NIMBUS PAY",
+        "account_suffix": null,
+        "occurred_at_text": null,
+        "reference_text": "730164",
+        "balance_text": null,
+        "balance_type": null,
+        "evidence": {
+          "merchant": "NIMBUS PAY"
+        }
+      }
+    ]
+  },
+  "notes": "Invented Sinhala OTP. buildspec.md §18 requires OTPs to be filtered locally before persistence; the validator withholds the code from the accepted event.",
+  "synthetic": true
+}
