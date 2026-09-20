@@ -1,0 +1,33 @@
+{
+  "id": "sms_scheduled_standing_order",
+  "language": "en",
+  "channel": "sms",
+  "sender": "BlueLagoon Bank (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "Your standing order to CEYLON WATER BOARD for LKR 4,120.00 will be debited from account ****3358 on 25/09/2026. Please maintain sufficient funds.",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_scheduled_water",
+    "events": [
+      {
+        "event_type": "pending_payment",
+        "amount_text": "4,120.00",
+        "currency": "LKR",
+        "merchant_text": "CEYLON WATER BOARD",
+        "account_suffix": "3358",
+        "occurred_at_text": "25/09/2026",
+        "reference_text": null,
+        "balance_text": null,
+        "balance_type": null,
+        "evidence": {
+          "amount": "for LKR 4,120.00",
+          "merchant": "to CEYLON WATER BOARD",
+          "account": "account ****3358",
+          "date": "on 25/09/2026"
+        }
+      }
+    ]
+  },
+  "notes": "buildspec.md §7.1: \"A message saying 'will debit' is scheduled, not posted.\" The date is in the future, which is only plausible because the posting class is scheduled.",
+  "synthetic": true
+}

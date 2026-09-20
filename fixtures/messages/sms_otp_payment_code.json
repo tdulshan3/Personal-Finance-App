@@ -1,0 +1,31 @@
+{
+  "id": "sms_otp_payment_code",
+  "language": "en",
+  "channel": "sms",
+  "sender": "NimbusPay (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "482913 is your one-time password for a LKR 12,500.00 online payment at NIMBUS PAY. Valid for 5 minutes. Never share this code.",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_otp_nimbus",
+    "events": [
+      {
+        "event_type": "otp",
+        "amount_text": "12,500.00",
+        "currency": "LKR",
+        "merchant_text": "NIMBUS PAY",
+        "account_suffix": null,
+        "occurred_at_text": null,
+        "reference_text": "482913",
+        "balance_text": null,
+        "balance_type": null,
+        "evidence": {
+          "amount": "a LKR 12,500.00 online payment",
+          "merchant": "at NIMBUS PAY"
+        }
+      }
+    ]
+  },
+  "notes": "buildspec.md §7.1: 'An OTP mentioning an amount does not prove payment.' The validator additionally withholds the code from reference_text (§18 data minimization), so the accepted event must come back with referenceText null.",
+  "synthetic": true
+}

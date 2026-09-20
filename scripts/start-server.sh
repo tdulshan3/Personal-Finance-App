@@ -169,7 +169,15 @@ info "(docs/adr/0003). Ctrl-C stops it and releases the wake lock."
 export HOSTNAME="$BIND"
 export PORT
 export NODE_ENV=production
+
+# Read by src/server/vault.ts. The database lives outside the deployed tree so no deploy can
+# reach it (docs/adr/0002).
 export PFA_DATA_DIR="$DATA_DIR"
+
+# Read by src/server/session.ts for the session cookie's Secure flag. Deliberately left unset:
+# this server speaks plain HTTP, so a Secure cookie would never be sent back and login would
+# silently fail. Set it to "true" only behind a TLS terminator.
+# export PFA_REQUIRE_HTTPS=true
 
 {
   printf '\n=== %s  start  bind=%s port=%s ===\n' "$(date -Iseconds)" "$BIND" "$PORT"

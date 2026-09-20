@@ -1,0 +1,34 @@
+{
+  "id": "sms_failed_declined_fuel",
+  "language": "en",
+  "channel": "sms",
+  "sender": "BlueLagoon Cards (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "Transaction declined. Your card ****7401 could not be charged LKR 8,990.00 at AURORA FUEL STATION on 18/09/2026 due to insufficient funds. Ref DCL77120.",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_failed_aurora",
+    "events": [
+      {
+        "event_type": "failed",
+        "amount_text": "8,990.00",
+        "currency": "LKR",
+        "merchant_text": "AURORA FUEL STATION",
+        "account_suffix": "7401",
+        "occurred_at_text": "18/09/2026",
+        "reference_text": "DCL77120",
+        "balance_text": null,
+        "balance_type": null,
+        "evidence": {
+          "amount": "could not be charged LKR 8,990.00",
+          "merchant": "at AURORA FUEL STATION",
+          "account": "card ****7401",
+          "date": "on 18/09/2026",
+          "reference": "Ref DCL77120"
+        }
+      }
+    ]
+  },
+  "notes": "buildspec.md §7.1: 'A failed/declined transaction is not spending.' The event is recorded but its posting class is non_financial.",
+  "synthetic": true
+}

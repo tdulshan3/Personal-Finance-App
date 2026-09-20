@@ -17,6 +17,7 @@ ADR spells out which.
 | [0004](0004-sms-via-termux-api-polling.md) | SMS capture by polling `termux-sms-list`, not Android broadcasts | §5.4, §5.5 |
 | [0005](0005-llama-cpp-openai-endpoint-instead-of-ollama.md) | llama.cpp's OpenAI-compatible endpoint instead of Ollama's native API | §7.2, §7.3 (transport) |
 | [0006](0006-money-as-bigint-minor-units.md) | Money as `bigint` minor units, decimal strings on the wire | — (implements §9.1, §16) |
+| [0007](0007-http-session-auth-for-the-phone-server.md) | Unlocking is authentication: one passphrase, an in-memory session token, loopback by default | §3 (the "no HTTP server" rule), fills §16/§18 |
 
 ## Known conflicts without an ADR yet
 
@@ -24,11 +25,16 @@ ADR spells out which.
   §16 maps `ModelService.listAgentModels` onto it. If the agent endpoint is also llama.cpp, it needs
   the same treatment as [ADR 0005](0005-llama-cpp-openai-endpoint-instead-of-ollama.md), plus a
   decision about tool calling. Needed before M6.
-- **§16 / §18 authentication for the HTTP surface.** [ADR 0001](0001-nextjs-node-on-termux-instead-of-kotlin-compose.md)
-  introduces a real HTTP server on the phone, which §3 forbade. How sessions, CSRF defence and the
-  lock state interact has not been decided. Needed before the server is ever bound to a LAN address.
 - **§21 M7's "signed installable Android package"** has no equivalent here. What replaces it as a
   release gate is sketched in [../milestones.md](../milestones.md) but not decided.
+- **§6 Gmail authorization.** §6 assumes Android's identity library, which does not apply to a Node
+  server. There is also an ordering problem created by [ADR 0003](0003-sqlite-encryption-with-passphrase-derived-key.md):
+  the server starts locked, so there is no key available to encrypt a stored refresh token until the
+  owner unlocks. Needed before M3.
+- **Transport encryption and client pairing.** [ADR 0007](0007-http-session-auth-for-the-phone-server.md)
+  authenticates the session but leaves the transport unencrypted, so the server stays on loopback.
+  §18's "authenticate paired clients, encrypt transport" is not met and needs a successor ADR before
+  `--expose-lan` is used on any shared network.
 
 ## Format
 

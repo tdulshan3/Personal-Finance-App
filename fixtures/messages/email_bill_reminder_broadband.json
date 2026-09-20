@@ -1,0 +1,32 @@
+{
+  "id": "email_bill_reminder_broadband",
+  "language": "en",
+  "channel": "email",
+  "sender": "billing@silverline.example (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "Dear Customer,\n\nYour SILVERLINE FIBRE broadband bill for August 2026 is LKR 6,200.00.\nAccount number: 9004421. Due date: 28/09/2026.\nPay online at silverline.example to avoid service interruption.\n\nSILVERLINE FIBRE Billing",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_bill_silverline",
+    "events": [
+      {
+        "event_type": "bill",
+        "amount_text": "6,200.00",
+        "currency": "LKR",
+        "merchant_text": "SILVERLINE FIBRE",
+        "account_suffix": null,
+        "occurred_at_text": "28/09/2026",
+        "reference_text": null,
+        "balance_text": null,
+        "balance_type": null,
+        "evidence": {
+          "amount": "bill for August 2026 is LKR 6,200.00",
+          "merchant": "SILVERLINE FIBRE broadband",
+          "date": "Due date: 28/09/2026"
+        }
+      }
+    ]
+  },
+  "notes": "For a bill, occurred_at_text carries the due date; §11 turns it into a due date rather than an occurrence. The biller account number 9004421 is not a masked card suffix, so account_suffix stays null.",
+  "synthetic": true
+}

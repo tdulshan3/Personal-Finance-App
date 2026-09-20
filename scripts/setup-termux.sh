@@ -235,17 +235,24 @@ if node -e '
   const file = path.join(process.argv[2], "smoke.db");
   const key = "throwaway-passphrase-not-a-real-key";
 
+  // The cipher pragma has to be set on EVERY connection, before the key. The library defaults to
+  // chacha20, so keying an sqlcipher database without selecting the scheme first fails with
+  // SQLITE_NOTADB — which looks exactly like corruption.
+  const open = (opts) => {
+    const db = new Database(file, opts);
+    db.pragma("cipher = \x27sqlcipher\x27");
+    db.pragma("key = \x27" + key + "\x27");
+    return db;
+  };
+
   // Write an encrypted database.
-  let db = new Database(file);
-  db.pragma("cipher = \x27sqlcipher\x27");
-  db.pragma("key = \x27" + key + "\x27");
+  let db = open({});
   db.exec("CREATE TABLE t (minor INTEGER NOT NULL)");
   db.prepare("INSERT INTO t (minor) VALUES (?)").run(345000n);
   db.close();
 
   // Reopen with the key: the row must come back, and come back as a BigInt (docs/adr/0006).
-  db = new Database(file, { readonly: true });
-  db.pragma("key = \x27" + key + "\x27");
+  db = open({ readonly: true });
   db.defaultSafeIntegers(true);
   const row = db.prepare("SELECT minor FROM t").get();
   db.close();

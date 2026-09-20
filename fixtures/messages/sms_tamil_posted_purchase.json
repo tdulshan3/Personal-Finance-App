@@ -1,0 +1,34 @@
+{
+  "id": "sms_tamil_posted_purchase",
+  "language": "ta",
+  "channel": "sms",
+  "sender": "BlueLagoon Bank (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "உங்கள் கணக்கு ****7788 இலிருந்து 2026/09/14 அன்று CARGILLS FOOD CITY இல் ரூ. 5,400.00 செலுத்தப்பட்டது. இருப்பு ரூ. 18,905.75.",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_tamil_cargills",
+    "events": [
+      {
+        "event_type": "posted_expense",
+        "amount_text": "5,400.00",
+        "currency": "LKR",
+        "merchant_text": "CARGILLS FOOD CITY",
+        "account_suffix": "7788",
+        "occurred_at_text": "2026/09/14",
+        "reference_text": null,
+        "balance_text": "18,905.75",
+        "balance_type": "unknown",
+        "evidence": {
+          "amount": "ரூ. 5,400.00",
+          "merchant": "CARGILLS FOOD CITY",
+          "account": "****7788",
+          "date": "2026/09/14",
+          "balance": "இருப்பு ரூ. 18,905.75"
+        }
+      }
+    ]
+  },
+  "notes": "Invented Tamil SMS. Same shape as the Sinhala fixture, used to check that evidence matching survives a non-Latin script after Unicode normalisation.",
+  "synthetic": true
+}

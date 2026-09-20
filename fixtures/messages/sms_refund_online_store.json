@@ -1,0 +1,33 @@
+{
+  "id": "sms_refund_online_store",
+  "language": "en",
+  "channel": "sms",
+  "sender": "BlueLagoon Cards (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "Refund of LKR 1,275.50 from MAHAWELI ONLINE STORE has been credited to your card ****1234 on 17/09/2026. Ref RFD4482190.",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_refund_mahaweli",
+    "events": [
+      {
+        "event_type": "refund",
+        "amount_text": "1,275.50",
+        "currency": "LKR",
+        "merchant_text": "MAHAWELI ONLINE STORE",
+        "account_suffix": "1234",
+        "occurred_at_text": "17/09/2026",
+        "reference_text": "RFD4482190",
+        "balance_text": null,
+        "balance_type": null,
+        "evidence": {
+          "amount": "Refund of LKR 1,275.50",
+          "merchant": "from MAHAWELI ONLINE STORE",
+          "account": "card ****1234",
+          "reference": "Ref RFD4482190"
+        }
+      }
+    ]
+  },
+  "notes": "buildspec.md §22 fixture 'Partial refund 500': the refund reduces net spending in the original category and must not be recorded as income.",
+  "synthetic": true
+}
