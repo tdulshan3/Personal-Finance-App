@@ -61,7 +61,10 @@ longer applies, the *requirement* is restated rather than dropped.
 - **the Assistant**: rules-first answers with no model, tool calling against the owner's agent
   model for the rest, and a proposal boundary only the owner's Confirm crosses
   ([ADR 0009](adr/0009-assistant-rules-first-and-proposal-boundary.md));
-- an iOS-style interface across every screen, light and dark.
+- an iOS-style interface across every screen, light and dark, with a **desktop layout** from
+  1024 px (sidebar navigation) and multi-column pages from 1200 px;
+- **live updates**: every open screen follows the ledger within about a second, on every device
+  ([ADR 0010](adr/0010-live-updates-over-sse.md)).
 
 **What does not exist:** Gmail, bills and recurrence, reconciliation, forecast and savings, SMS
 *history* import from the UI (the XML parser exists and is tested; nothing calls it), restore from a

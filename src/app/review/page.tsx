@@ -10,6 +10,7 @@ import { Badge, Card, EmptyState, PageHeader, Shell } from "../../ui/primitives.
 import { ProcessButton } from "./process-button.tsx";
 import type { ReviewCardData } from "./review-card.tsx";
 import { ReviewCard } from "./review-card.tsx";
+import styles from "./review.module.css";
 
 export const dynamic = "force-dynamic";
 
@@ -94,13 +95,11 @@ export default async function ReviewPage() {
           />
         </Card>
       ) : (
-        <Card>
-          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "var(--space-5)" }}>
-            {cards.map((card) => (
-              <ReviewCard key={card.eventId} data={toData(card)} accounts={accounts} categories={categories} today={today} />
-            ))}
-          </ul>
-        </Card>
+        <ul className={styles.grid} role="list">
+          {cards.map((card) => (
+            <ReviewCard key={card.eventId} data={toData(card)} accounts={accounts} categories={categories} today={today} />
+          ))}
+        </ul>
       )}
     </Shell>
   );

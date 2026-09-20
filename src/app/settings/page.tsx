@@ -5,7 +5,7 @@ import { requireDb } from "../../server/runtime.ts";
 import { accessState } from "../../server/session.ts";
 import { headers } from "next/headers";
 
-import { Badge, Card, PageHeader, Shell } from "../../ui/primitives.tsx";
+import { Badge, Card, Columns, PageHeader, Shell, Stack } from "../../ui/primitives.tsx";
 import { BackupSection } from "./backup-section.tsx";
 import { EndpointCard } from "./endpoint-card.tsx";
 import { smsOverview } from "./sms-actions.ts";
@@ -44,59 +44,70 @@ export default async function SettingsPage() {
         subtitle="Two separate AI configurations. Saving one never changes the other."
       />
 
-      <SmsCard overview={sms} webhookUrl={webhookUrl} />
-
-      <EndpointCard
-        role={EndpointRole.EXTRACTION}
-        title="Extraction model"
-        blurb={
-          "Reads financial messages into structured data. Runs once per message that the " +
-          "deterministic sender templates cannot handle, so speed matters more here than anywhere else."
-        }
-        current={serialise(extraction)}
-        recentTests={settings.recentTests(EndpointRole.EXTRACTION, 3).map(serialiseTest)}
-        suggestions={[
-          { label: "Ollama on the PC", url: "http://192.168.1.84:11434" },
-          { label: "llama.cpp host", url: "http://192.168.1.118:8081" },
-        ]}
-      />
-
-      <EndpointCard
-        role={EndpointRole.AGENT}
-        title="Assistant model"
-        blurb={
-          "Answers questions and proposes changes. It never writes to the ledger directly — every " +
-          "change it suggests needs your confirmation first."
-        }
-        current={serialise(agent)}
-        recentTests={settings.recentTests(EndpointRole.AGENT, 3).map(serialiseTest)}
-        suggestions={[
-          { label: "Ollama on the PC", url: "http://192.168.1.84:11434" },
-          { label: "llama.cpp host", url: "http://192.168.1.118:8081" },
-        ]}
-      />
-
-      <Card title="Why the endpoint has to be reachable">
-        <div style={{ display: "grid", gap: "var(--space-3)", fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
-          <p>
-            Both models run on other machines on your network, so the phone can only use them while
-            it is on that network. Messages still arrive and are captured when it is not — they
-            queue, and the queue drains by itself once the model host is reachable again.
-          </p>
-          <p>
-            Ollama listens on localhost by default, which the phone cannot reach. To use it from the
-            phone, start Ollama with <code>OLLAMA_HOST=0.0.0.0</code> on the PC. Keep it on your own
-            network: it has no authentication of its own.
-          </p>
-          <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
-            <Badge tone="primary">Templates work offline</Badge>
-            <Badge>Model work queues</Badge>
-            <Badge>Nothing is lost</Badge>
+      {/*
+        Desktop: capture and backups on the left, the two model endpoints on the right. On a phone
+        the stacks dissolve; the wrapper's `order` keeps Backups last, where it has always been.
+      */}
+      <Columns layout="halves">
+        <Stack>
+          <SmsCard overview={sms} webhookUrl={webhookUrl} />
+          <div style={{ order: 1, minWidth: 0 }}>
+            <BackupSection />
           </div>
-        </div>
-      </Card>
+        </Stack>
 
-      <BackupSection />
+        <Stack>
+          <EndpointCard
+            role={EndpointRole.EXTRACTION}
+            title="Extraction model"
+            blurb={
+              "Reads financial messages into structured data. Runs once per message that the " +
+              "deterministic sender templates cannot handle, so speed matters more here than anywhere else."
+            }
+            current={serialise(extraction)}
+            recentTests={settings.recentTests(EndpointRole.EXTRACTION, 3).map(serialiseTest)}
+            suggestions={[
+              { label: "Ollama on the PC", url: "http://192.168.1.84:11434" },
+              { label: "llama.cpp host", url: "http://192.168.1.118:8081" },
+            ]}
+          />
+
+          <EndpointCard
+            role={EndpointRole.AGENT}
+            title="Assistant model"
+            blurb={
+              "Answers questions and proposes changes. It never writes to the ledger directly — every " +
+              "change it suggests needs your confirmation first."
+            }
+            current={serialise(agent)}
+            recentTests={settings.recentTests(EndpointRole.AGENT, 3).map(serialiseTest)}
+            suggestions={[
+              { label: "Ollama on the PC", url: "http://192.168.1.84:11434" },
+              { label: "llama.cpp host", url: "http://192.168.1.118:8081" },
+            ]}
+          />
+
+          <Card title="Why the endpoint has to be reachable">
+            <div style={{ display: "grid", gap: "var(--space-3)", fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
+              <p>
+                Both models run on other machines on your network, so the phone can only use them while
+                it is on that network. Messages still arrive and are captured when it is not — they
+                queue, and the queue drains by itself once the model host is reachable again.
+              </p>
+              <p>
+                Ollama listens on localhost by default, which the phone cannot reach. To use it from the
+                phone, start Ollama with <code>OLLAMA_HOST=0.0.0.0</code> on the PC. Keep it on your own
+                network: it has no authentication of its own.
+              </p>
+              <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+                <Badge tone="primary">Templates work offline</Badge>
+                <Badge>Model work queues</Badge>
+                <Badge>Nothing is lost</Badge>
+              </div>
+            </div>
+          </Card>
+        </Stack>
+      </Columns>
     </Shell>
   );
 }

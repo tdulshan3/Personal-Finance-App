@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { startTransition, useActionState } from "react";
 
 import { Badge, ErrorNote } from "../../ui/primitives.tsx";
-import { Button, Field, FormRow, MoneyInput, Select, SubmitButton, TextInput } from "../../ui/form.tsx";
+import { Button, Field, MoneyInput, Select, TextInput } from "../../ui/form.tsx";
 import type { ReviewState } from "./actions.ts";
 import { acceptReviewAction, ignoreReviewAction } from "./actions.ts";
+import styles from "./review.module.css";
 
 export type ReviewCardData = {
   eventId: string;
@@ -55,11 +56,11 @@ export function ReviewCard({
   categories: readonly { id: string; name: string }[];
   today: string;
 }) {
-  const [state, runAccept] = useActionState<ReviewState, FormData>(acceptReviewAction, {});
+  const [state, runAccept, isAccepting] = useActionState<ReviewState, FormData>(acceptReviewAction, {});
   const defaultKind = data.kind === "posted_income" ? "income" : data.kind === "refund" ? "refund" : "expense";
 
   return (
-    <li style={{ display: "grid", gap: "var(--space-3)", paddingBottom: "var(--space-5)", borderBottom: "1px solid var(--border)" }}>
+    <li className={styles.item}>
       <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center" }}>
         <strong>{data.sender}</strong>
         <Badge tone="primary">{data.kindLabel}</Badge>
@@ -94,9 +95,21 @@ export function ReviewCard({
       ) : null}
 
       {data.postable ? (
-        <form action={runAccept}>
+        <form
+          onSubmit={(event) => {
+            // `onSubmit`, not `action={...}`: React 19 resets a form when its action settles, even
+            // on a validation error. Here that would quietly put the account and category back to
+            // what the rules suggested, discarding the owner's correction just before they press
+            // Accept again.
+            event.preventDefault();
+            if (isAccepting) return;
+            const formData = new FormData(event.currentTarget);
+            startTransition(() => runAccept(formData));
+          }}
+        >
           <input type="hidden" name="eventId" value={data.eventId} />
-          <FormRow>
+          {/* One column on a phone; on a wide screen the fields pair up: type+account, amount+date. */}
+          <div className={styles.fields}>
             <Field label="Record as">
               {({ id, describedBy }) => (
                 <Select id={id} name="kind" defaultValue={defaultKind} describedBy={describedBy}>
@@ -145,9 +158,13 @@ export function ReviewCard({
                 <TextInput id={id} name="merchantName" defaultValue={data.merchantText ?? ""} maxLength={120} describedBy={describedBy} />
               )}
             </Field>
-            {state.error ? <ErrorNote>{state.error}</ErrorNote> : null}
-            <SubmitButton pendingLabel="Recording…">Accept and record</SubmitButton>
-          </FormRow>
+            <div className={styles.full}>
+              {state.error ? <ErrorNote>{state.error}</ErrorNote> : null}
+              <Button disabled={isAccepting} aria-busy={isAccepting}>
+                {isAccepting ? "Recording…" : "Accept and record"}
+              </Button>
+            </div>
+          </div>
         </form>
       ) : (
         <p style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
