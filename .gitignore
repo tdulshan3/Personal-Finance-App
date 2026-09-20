@@ -1,0 +1,25 @@
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# buildspec.md §18: the encrypted database, its WAL/journal and any backup never enter Git.
+/data/
+*.db
+*.db-wal
+*.db-shm
+*.backup.pfa
+
+# buildspec.md §21 (M7): signing and credential material must be excluded from the repository.
+/secrets/
+credentials.json
+token.json
+
+# buildspec.md §5.6.9 / §22: no real messages, exports or device dumps in the repository.
+/fixtures/real/
+*.sms-backup.xml
