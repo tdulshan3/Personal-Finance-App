@@ -3,109 +3,86 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import {
+  AccountsIcon,
+  ActivityIcon,
+  AssistantIcon,
+  BillsIcon,
+  HomeIcon,
+  PlanIcon,
+  PlusIcon,
+  ReviewIcon,
+  SettingsIcon,
+  TransactionsIcon,
+} from "./icons.tsx";
+
 /**
  * buildspec.md §13: "Use five main destinations: Home, Transactions, Bills, Plan, Assistant."
  *
- * Bills, Plan and Assistant belong to milestones M4-M6. They are shown but marked as not yet built
- * rather than hidden, so the app never implies a feature works before it does (§13: "No feature
- * should depend on a spinning indicator forever").
+ * All five are real routes. The bar floats above the content as a glass capsule, inset from the
+ * screen edges and from the home indicator; §13 allows glass "for navigation", and the `.glass`
+ * fallbacks in globals.css turn it solid when blur is unsupported or transparency is reduced.
+ *
+ * The selected tab is never marked by colour alone: it also gets a capsule behind it and
+ * `aria-current="page"`.
  */
 const DESTINATIONS = [
-  { href: "/", label: "Home", icon: "◉", ready: true },
-  { href: "/transactions", label: "Transactions", icon: "☰", ready: true },
-  { href: "/bills", label: "Bills", icon: "▦", ready: false },
-  { href: "/plan", label: "Plan", icon: "◔", ready: false },
-  { href: "/assistant", label: "Assistant", icon: "✦", ready: false },
+  { href: "/", label: "Home", Icon: HomeIcon },
+  { href: "/transactions", label: "Transactions", Icon: TransactionsIcon },
+  { href: "/bills", label: "Bills", Icon: BillsIcon },
+  { href: "/plan", label: "Plan", Icon: PlanIcon },
+  { href: "/assistant", label: "Assistant", Icon: AssistantIcon },
 ] as const;
 
 export function BottomNav() {
   const pathname = usePathname();
 
   return (
-    <nav
-      aria-label="Main"
-      className="glass"
-      style={{
-        position: "fixed",
-        insetInline: 0,
-        bottom: 0,
-        display: "flex",
-        justifyContent: "space-around",
-        gap: "var(--space-1)",
-        padding: `var(--space-2) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom, 0px))`,
-        borderTop: "1px solid var(--glass-border)",
-        borderInline: "none",
-        borderBottom: "none",
-        zIndex: 20,
-      }}
-    >
-      {DESTINATIONS.map((destination) => {
-        const active =
-          destination.href === "/"
-            ? pathname === "/"
-            : pathname.startsWith(destination.href);
-        return (
-          <Link
-            key={destination.href}
-            href={destination.href}
-            aria-current={active ? "page" : undefined}
-            style={{
-              flex: 1,
-              minHeight: "var(--touch-target)",
-              display: "grid",
-              placeItems: "center",
-              gap: "2px",
-              padding: "var(--space-1)",
-              borderRadius: "var(--radius-input)",
-              color: active ? "var(--primary)" : "var(--text-secondary)",
-              background: active ? "var(--primary-soft)" : "transparent",
-              textDecoration: "none",
-              opacity: destination.ready ? 1 : 0.55,
-            }}
-          >
-            <span aria-hidden="true" style={{ fontSize: "1.05rem", lineHeight: 1 }}>
-              {destination.icon}
-            </span>
-            <span style={{ fontSize: "var(--font-xs)", fontWeight: 560 }}>
-              {destination.label}
-            </span>
-            {!destination.ready ? <span className="visually-hidden">(not built yet)</span> : null}
-          </Link>
-        );
-      })}
+    <nav aria-label="Main" className="tabbar-wrap">
+      <div className="tabbar glass">
+        {DESTINATIONS.map(({ href, label, Icon }) => {
+          // "/transactions/new" still belongs to Transactions; "/planner" would not belong to Plan.
+          const active =
+            href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
+          return (
+            <Link
+              key={href}
+              href={href}
+              aria-current={active ? "page" : undefined}
+              className="tabbar-item"
+            >
+              <Icon size={24} />
+              <span>{label}</span>
+            </Link>
+          );
+        })}
+      </div>
     </nav>
   );
 }
 
-/** A secondary row of links for the screens that are not main destinations (§13). */
+/**
+ * The screens that are not main destinations (§13), as a row of tinted capsules that scrolls
+ * sideways. "Add" stays here so that recording a transaction is always one tap from Home — §13:
+ * "Keep a visible Add button available without chat."
+ */
+const QUICK_LINKS = [
+  { href: "/accounts", label: "Accounts", Icon: AccountsIcon, ariaLabel: undefined },
+  { href: "/transactions/new", label: "Add", Icon: PlusIcon, ariaLabel: "Add transaction" },
+  { href: "/review", label: "Review", Icon: ReviewIcon, ariaLabel: undefined },
+  { href: "/activity", label: "Activity", Icon: ActivityIcon, ariaLabel: undefined },
+  { href: "/settings", label: "Settings", Icon: SettingsIcon, ariaLabel: undefined },
+] as const;
+
 export function QuickLinks() {
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
-      {[
-        { href: "/accounts", label: "Accounts" },
-        { href: "/transactions/new", label: "Add transaction" },
-        { href: "/settings", label: "Settings" },
-      ].map((link) => (
-        <Link
-          key={link.href}
-          href={link.href}
-          style={{
-            minHeight: "40px",
-            display: "inline-flex",
-            alignItems: "center",
-            padding: "0 var(--space-4)",
-            borderRadius: "var(--radius-pill)",
-            border: "1px solid var(--border)",
-            background: "var(--surface)",
-            color: "var(--text)",
-            fontSize: "var(--font-sm)",
-            fontWeight: 560,
-            textDecoration: "none",
-          }}
-        >
-          {link.label}
+    <nav aria-label="Shortcuts" className="chip-row">
+      {QUICK_LINKS.map(({ href, label, Icon, ariaLabel }) => (
+        <Link key={href} href={href} className="chip" aria-label={ariaLabel}>
+          <Icon size={18} strokeWidth={2.25} />
+          {label}
         </Link>
       ))}
-    </div>
+    </nav>
   );
 }

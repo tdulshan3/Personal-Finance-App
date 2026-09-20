@@ -178,7 +178,7 @@ export function AccountRow({ data }: { data: AccountRowData }) {
             {state.error ? <ErrorNote>{state.error}</ErrorNote> : null}
             {state.ok ? (
               <p role="status" style={{ fontSize: "var(--font-sm)", color: "var(--success)" }}>
-                {state.ok} Reload to see it above.
+                {state.ok}
               </p>
             ) : null}
 

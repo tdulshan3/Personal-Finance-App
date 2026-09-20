@@ -5,23 +5,20 @@ import { useFormStatus } from "react-dom";
 
 import type { ReactNode } from "react";
 
+import { cx } from "./cx.ts";
+import { ChevronsUpDownIcon } from "./icons.tsx";
+
 /**
  * Accessible form controls.
  *
  * buildspec.md §13: "Forms validate money, dates, required accounts, split totals, and dependent
  * records before saving", with 48 dp minimum touch targets and labels that TalkBack can announce.
  * Every field here owns a real `<label for>` — no placeholder-as-label.
+ *
+ * Controls are filled rather than outlined, 50 px tall, and set in 17 px type: iOS Safari zooms the
+ * whole page when a field smaller than 16 px takes focus. The visual rules are the `.control`,
+ * `.btn` and `.field` classes in `src/app/globals.css`; `style` and `className` still pass through.
  */
-
-const controlStyle = {
-  width: "100%",
-  minHeight: "var(--touch-target)",
-  padding: "0 var(--space-4)",
-  borderRadius: "var(--radius-input)",
-  border: "1px solid var(--border)",
-  background: "var(--surface)",
-  color: "var(--text)",
-} as const;
 
 export function Field({
   label,
@@ -40,18 +37,18 @@ export function Field({
   const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined;
 
   return (
-    <div style={{ display: "grid", gap: "var(--space-2)" }}>
-      <label htmlFor={id} style={{ fontSize: "var(--font-sm)", fontWeight: 560 }}>
+    <div className="field">
+      <label htmlFor={id} className="field-label">
         {label}
       </label>
       {children({ id, describedBy })}
       {hint ? (
-        <span id={hintId} style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
+        <span id={hintId} className="field-hint">
           {hint}
         </span>
       ) : null}
       {error ? (
-        <span id={errorId} role="alert" style={{ fontSize: "var(--font-sm)", color: "var(--danger)" }}>
+        <span id={errorId} role="alert" className="field-error">
           {error}
         </span>
       ) : null}
@@ -62,8 +59,8 @@ export function Field({
 export function TextInput(
   props: React.InputHTMLAttributes<HTMLInputElement> & { describedBy?: string | undefined },
 ) {
-  const { describedBy, style, ...rest } = props;
-  return <input {...rest} aria-describedby={describedBy} style={{ ...controlStyle, ...style }} />;
+  const { describedBy, className, ...rest } = props;
+  return <input {...rest} aria-describedby={describedBy} className={cx("control", className)} />;
 }
 
 /**
@@ -79,19 +76,10 @@ export function MoneyInput(
     describedBy?: string | undefined;
   },
 ) {
-  const { currencyCode, describedBy, style, ...rest } = props;
+  const { currencyCode, describedBy, className, style, ...rest } = props;
   return (
-    <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-      <span
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          left: "var(--space-4)",
-          color: "var(--text-secondary)",
-          fontSize: "var(--font-sm)",
-          pointerEvents: "none",
-        }}
-      >
+    <div className="money-field">
+      <span aria-hidden="true" className="money-field-code">
         {currencyCode}
       </span>
       <input
@@ -99,11 +87,10 @@ export function MoneyInput(
         inputMode="decimal"
         autoComplete="off"
         aria-describedby={describedBy}
-        className="money"
+        className={cx("control", "money", className)}
         style={{
-          ...controlStyle,
+          // Leaves room for the currency code, however many letters it has.
           paddingLeft: `calc(var(--space-4) + ${currencyCode.length}ch + var(--space-2))`,
-          textAlign: "right",
           ...style,
         }}
       />
@@ -111,48 +98,41 @@ export function MoneyInput(
   );
 }
 
+/**
+ * The native select, restyled. `appearance: none` removes the platform arrow, so an up-down chevron
+ * is drawn over it — the mark iOS uses for a control that opens a list of choices. Tapping it still
+ * opens the phone's own picker.
+ */
 export function Select(
   props: React.SelectHTMLAttributes<HTMLSelectElement> & { describedBy?: string | undefined },
 ) {
-  const { describedBy, style, children, ...rest } = props;
+  const { describedBy, className, children, ...rest } = props;
   return (
-    <select {...rest} aria-describedby={describedBy} style={{ ...controlStyle, ...style }}>
-      {children}
-    </select>
+    <span className="select-wrap">
+      <select {...rest} aria-describedby={describedBy} className={cx("control", className)}>
+        {children}
+      </select>
+      <ChevronsUpDownIcon size={18} className="select-chevron" />
+    </span>
   );
 }
 
+/**
+ * primary = filled capsule · secondary = tinted capsule · ghost = plain accent text ·
+ * danger = tinted red. Pass `style` for a one-off size; a button drawn shorter than 48 px keeps a
+ * 48 px touch target (see `.btn::before`).
+ */
 export function Button({
   children,
   variant = "primary",
   type = "submit",
+  className,
   ...rest
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "secondary" | "danger" | "ghost";
 }) {
-  const palette = {
-    primary: { bg: "var(--primary)", fg: "var(--primary-contrast)", border: "transparent" },
-    secondary: { bg: "var(--surface)", fg: "var(--text)", border: "var(--border)" },
-    danger: { bg: "var(--danger-soft)", fg: "var(--danger)", border: "transparent" },
-    ghost: { bg: "transparent", fg: "var(--primary)", border: "transparent" },
-  }[variant];
-
   return (
-    <button
-      {...rest}
-      type={type}
-      style={{
-        minHeight: "var(--touch-target)",
-        padding: "0 var(--space-5)",
-        borderRadius: "var(--radius-pill)",
-        border: `1px solid ${palette.border}`,
-        background: palette.bg,
-        color: palette.fg,
-        fontWeight: 600,
-        cursor: "pointer",
-        ...rest.style,
-      }}
-    >
+    <button {...rest} type={type} className={cx("btn", `btn-${variant}`, className)}>
       {children}
     </button>
   );
@@ -177,5 +157,5 @@ export function SubmitButton({
 }
 
 export function FormRow({ children }: { children: ReactNode }) {
-  return <div style={{ display: "grid", gap: "var(--space-4)" }}>{children}</div>;
+  return <div className="form-row">{children}</div>;
 }

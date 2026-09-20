@@ -1,12 +1,13 @@
-import Link from "next/link";
+import type { Route } from "next";
 
-import { Badge, Card, PageHeader, Shell } from "./primitives.tsx";
+import { CheckIcon, ClockIcon } from "./icons.tsx";
+import { Badge, Card, List, ListRow, PageHeader, Shell } from "./primitives.tsx";
 
 /**
  * The page behind a navigation destination that has not been built yet.
  *
  * buildspec.md §13 fixes the five main destinations — Home, Transactions, Bills, Plan, Assistant —
- * so the navigation shows all five from the start. Three of them belong to later milestones, and
+ * so the navigation shows all five from the start. Some of them belong to later milestones, and
  * linking to a route that does not exist produced a 404: the app appeared broken rather than
  * unfinished.
  *
@@ -40,59 +41,56 @@ export function NotBuiltYet({
       />
 
       <Card>
-        <p style={{ color: "var(--text-secondary)" }}>{summary}</p>
-
-        <h3 style={{ marginTop: "var(--space-5)", marginBottom: "var(--space-3)" }}>
-          What this screen will do
-        </h3>
-        <ul
-          style={{
-            margin: 0,
-            paddingLeft: "1.1rem",
-            display: "grid",
-            gap: "var(--space-2)",
-            color: "var(--text-secondary)",
-          }}
-        >
-          {willDo.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-
-        {blockedBy && blockedBy.length > 0 ? (
-          <>
-            <h3 style={{ marginTop: "var(--space-5)", marginBottom: "var(--space-3)" }}>
-              What has to come first
-            </h3>
-            <ul
-              style={{
-                margin: 0,
-                paddingLeft: "1.1rem",
-                display: "grid",
-                gap: "var(--space-2)",
-                color: "var(--text-secondary)",
-              }}
-            >
-              {blockedBy.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </>
-        ) : null}
-
-        {useInstead ? (
-          <p style={{ marginTop: "var(--space-5)" }}>
-            In the meantime: <Link href={useInstead.href}>{useInstead.label}</Link>
-          </p>
-        ) : null}
+        <p>{summary}</p>
       </Card>
 
-      <Card>
-        <p style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
+      <Card title="What this screen will do">
+        <List>
+          {willDo.map((item) => (
+            <ListRow key={item} leading={<CheckIcon size={18} strokeWidth={2.5} />}>
+              {item}
+            </ListRow>
+          ))}
+        </List>
+      </Card>
+
+      {blockedBy && blockedBy.length > 0 ? (
+        <Card title="What has to come first">
+          <List>
+            {blockedBy.map((item) => (
+              <ListRow
+                key={item}
+                leading={<ClockIcon size={18} strokeWidth={2.25} />}
+                leadingTone="warning"
+              >
+                {item}
+              </ListRow>
+            ))}
+          </List>
+        </Card>
+      ) : null}
+
+      {useInstead ? (
+        <Card
+          title="In the meantime"
+          footer="Nothing on Home, Transactions or Accounts depends on this screen. Everything the ledger already knows works without it."
+        >
+          <List>
+            {/* Every caller passes a literal in-app path; typed routes cannot see through `string`. */}
+            <ListRow href={useInstead.href as Route}>{sentenceCase(useInstead.label)}</ListRow>
+          </List>
+        </Card>
+      ) : (
+        <p className="footnote" style={{ paddingInline: "var(--space-4)" }}>
           Nothing on Home, Transactions or Accounts depends on this screen. Everything the ledger
           already knows works without it.
         </p>
-      </Card>
+      )}
     </Shell>
   );
+}
+
+/** The labels were written to follow "In the meantime:", so they start in lower case. */
+function sentenceCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
