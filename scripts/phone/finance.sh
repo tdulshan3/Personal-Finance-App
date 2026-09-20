@@ -52,11 +52,12 @@ DATA_DIR="${PFA_DATA_DIR:-$HOME/finance/data}"
 LOG_DIR="${PFA_LOG_DIR:-$HOME/finance/logs}"
 PORT="${PFA_PORT:-8090}"
 
-# Loopback by default.
+# Bound to the LAN, by the owner's explicit choice on 2026-09-20 (ADR 0008).
 #
-# ADR 0007: the session cookie authenticates the browser, but the transport is plain HTTP, so the
-# passphrase -- which is also the database key -- would cross the network in the clear on every
-# unlock. Anyone able to see LAN traffic could read it.
+# ADR 0007 kept this on loopback: the session cookie authenticates the browser, but the transport is plain HTTP, so the
+# passphrase -- which is also the database key -- crosses the network in the clear on every unlock.
+# Anyone able to see LAN traffic can read it. That cost is accepted deliberately here; it is not an
+# oversight, and it is why the TLS successor to ADR 0007 still needs writing.
 #
 # Two ways to reach the ledger from another machine:
 #
@@ -65,11 +66,10 @@ PORT="${PFA_PORT:-8090}"
 #      then open http://127.0.0.1:8090 on the laptop.
 #
 #   2. Bind the LAN, the way every other service on this phone already works, accepting the
-#      cleartext passphrase:
-#        PFA_HOST=0.0.0.0 sh finance.sh
+#      cleartext passphrase. Set PFA_HOST=127.0.0.1 to go back to loopback.
 #
-# The second is a deliberate trade, not a default.
-HOST="${PFA_HOST:-127.0.0.1}"
+# The owner chose (2) on 2026-09-20, so that is the default here. See ADR 0008.
+HOST="${PFA_HOST:-0.0.0.0}"
 
 die() { printf '%s\n' "$*" >&2; exit 1; }
 
