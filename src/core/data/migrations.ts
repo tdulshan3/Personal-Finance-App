@@ -396,9 +396,205 @@ CREATE TABLE ai_endpoint_tests (
 CREATE INDEX idx_endpoint_tests_role ON ai_endpoint_tests (role, tested_at DESC);
 `;
 
+/* -------------------------------------------------------------------------------------------- */
+/* 003 — message sources and the work queue (buildspec.md §17.1, §5)                              */
+/* -------------------------------------------------------------------------------------------- */
+
+const MIGRATION_003 = /* sql */ `
+-- buildspec.md §17.1: "Credentials stored separately; no raw OAuth tokens in rows."
+CREATE TABLE source_connections (
+  id              TEXT PRIMARY KEY,
+  kind            TEXT NOT NULL CHECK (kind IN ('sms_termux','sms_file','gmail','manual','notification')),
+  label           TEXT NOT NULL,
+  device_id       TEXT,
+  -- §5.4: "Record a provider dataset generation per device/installation. If IDs are reused or the
+  -- store is restored, stop trusting the old cursor and rescan using evidence-based deduplication."
+  provider_generation TEXT NOT NULL DEFAULT 'g1',
+  consent_at      INTEGER,
+  enabled         INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
+  filter_json     TEXT NOT NULL DEFAULT '{}',
+  cursor_json     TEXT NOT NULL DEFAULT '{}',
+  credential_ref  TEXT,
+  last_success_at INTEGER,
+  last_error      TEXT,
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
+) STRICT;
+
+-- The owner picks which senders are financial. Until one is enabled, nothing is stored
+-- (buildspec.md §18 data minimisation, §5.4 "let the owner choose sender filters").
+CREATE TABLE source_senders (
+  connection_id TEXT NOT NULL REFERENCES source_connections(id),
+  sender_key    TEXT NOT NULL,
+  display_name  TEXT,
+  enabled       INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
+  institution   TEXT,
+  first_seen_at INTEGER,
+  last_seen_at  INTEGER,
+  seen_count    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (connection_id, sender_key)
+) STRICT;
+
+CREATE INDEX idx_source_senders_enabled ON source_senders (connection_id, enabled);
+
+-- buildspec.md §17.1: "Unique connection + generation + external occurrence ID; encrypted body;
+-- ordinary deletion never touches Gmail/SMS." §17.3 requires every part of that key to be non-null.
+CREATE TABLE source_messages (
+  id                  TEXT PRIMARY KEY,
+  connection_id       TEXT NOT NULL REFERENCES source_connections(id),
+  provider_generation TEXT NOT NULL,
+  external_id         TEXT NOT NULL,
+  source_kind         TEXT NOT NULL,
+  sender              TEXT NOT NULL,
+  received_at         INTEGER NOT NULL,
+  source_sent_at      INTEGER,
+  body                TEXT,
+  -- §8: "Use an HMAC with an installation secret for searchable content fingerprints."
+  body_hmac           TEXT NOT NULL,
+  metadata_json       TEXT NOT NULL DEFAULT '{}',
+  processing_status   TEXT NOT NULL DEFAULT 'staged'
+                      CHECK (processing_status IN ('staged','parsed','needs_model','queued','reviewed','ignored','failed')),
+  retention_until     INTEGER,
+  purged_at           INTEGER,
+  created_at          INTEGER NOT NULL
+) STRICT;
+
+CREATE UNIQUE INDEX uq_source_occurrence
+  ON source_messages (connection_id, provider_generation, external_id);
+CREATE INDEX idx_source_messages_status ON source_messages (processing_status, received_at);
+CREATE INDEX idx_source_messages_hmac ON source_messages (body_hmac);
+CREATE INDEX idx_source_messages_sender ON source_messages (sender, received_at DESC);
+
+-- §17.1: "Resume without restarting or losing new arrivals."
+CREATE TABLE import_runs (
+  id            TEXT PRIMARY KEY,
+  connection_id TEXT NOT NULL REFERENCES source_connections(id),
+  trigger       TEXT NOT NULL,
+  range_start   INTEGER,
+  range_end     INTEGER,
+  status        TEXT NOT NULL CHECK (status IN ('running','complete','failed','cancelled')),
+  scanned_count INTEGER NOT NULL DEFAULT 0,
+  staged_count  INTEGER NOT NULL DEFAULT 0,
+  skipped_count INTEGER NOT NULL DEFAULT 0,
+  error_count   INTEGER NOT NULL DEFAULT 0,
+  coverage_json TEXT NOT NULL DEFAULT '{}',
+  started_at    INTEGER NOT NULL,
+  finished_at   INTEGER,
+  error         TEXT
+) STRICT;
+
+CREATE INDEX idx_import_runs_connection ON import_runs (connection_id, started_at DESC);
+
+-- §17.1: "Cache by input + parser/prompt/model versions; bounded retries."
+CREATE TABLE extraction_runs (
+  id             TEXT PRIMARY KEY,
+  source_id      TEXT NOT NULL REFERENCES source_messages(id),
+  engine         TEXT NOT NULL CHECK (engine IN ('rules','model')),
+  parser_version TEXT NOT NULL,
+  prompt_version TEXT,
+  model_name     TEXT,
+  model_digest   TEXT,
+  endpoint_origin TEXT,
+  input_hmac     TEXT NOT NULL,
+  status         TEXT NOT NULL CHECK (status IN ('ok','invalid','rejected','error')),
+  attempts       INTEGER NOT NULL DEFAULT 1,
+  error_code     TEXT,
+  timings_json   TEXT NOT NULL DEFAULT '{}',
+  created_at     INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX idx_extraction_runs_source ON extraction_runs (source_id, created_at DESC);
+CREATE INDEX idx_extraction_runs_cache ON extraction_runs (input_hmac, parser_version);
+
+-- §17.1: "Unique extraction run + event index; reparse candidates do not automatically create new
+-- transactions."
+CREATE TABLE source_events (
+  id                  TEXT PRIMARY KEY,
+  source_id           TEXT NOT NULL REFERENCES source_messages(id),
+  extraction_run_id   TEXT NOT NULL REFERENCES extraction_runs(id),
+  event_index         INTEGER NOT NULL,
+  kind                TEXT NOT NULL,
+  amount_minor        INTEGER,
+  currency            TEXT,
+  account_hint        TEXT,
+  merchant_text       TEXT,
+  occurred_at         INTEGER,
+  occurred_precision  TEXT,
+  reference_namespace TEXT,
+  reference_value     TEXT,
+  candidate_json      TEXT NOT NULL,
+  evidence_json       TEXT NOT NULL DEFAULT '{}',
+  status              TEXT NOT NULL DEFAULT 'needs_review'
+                      CHECK (status IN ('needs_review','accepted','ignored','superseded')),
+  created_at          INTEGER NOT NULL
+) STRICT;
+
+CREATE UNIQUE INDEX uq_source_event_index ON source_events (extraction_run_id, event_index);
+CREATE INDEX idx_source_events_status ON source_events (status, created_at);
+CREATE INDEX idx_source_events_match
+  ON source_events (currency, amount_minor, occurred_at, reference_value);
+
+-- §17.1: "Many evidence events to one transaction; at most one active canonical transaction per event."
+CREATE TABLE transaction_sources (
+  id              TEXT PRIMARY KEY,
+  transaction_id  TEXT NOT NULL REFERENCES transactions(id),
+  source_event_id TEXT NOT NULL REFERENCES source_events(id),
+  relation        TEXT NOT NULL DEFAULT 'canonical',
+  action_id       TEXT NOT NULL,
+  created_at      INTEGER NOT NULL,
+  ended_at        INTEGER
+) STRICT;
+
+CREATE UNIQUE INDEX uq_active_event_assignment
+  ON transaction_sources (source_event_id) WHERE ended_at IS NULL AND relation = 'canonical';
+CREATE INDEX idx_transaction_sources_txn ON transaction_sources (transaction_id);
+
+-- §17.1: "One active issue per target/reason where appropriate."
+CREATE TABLE review_items (
+  id                TEXT PRIMARY KEY,
+  kind              TEXT NOT NULL,
+  target_type       TEXT NOT NULL,
+  target_id         TEXT NOT NULL,
+  reason_codes      TEXT NOT NULL,
+  suggestion_json   TEXT NOT NULL DEFAULT '{}',
+  status            TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','resolved','ignored')),
+  resolved_action_id TEXT,
+  created_at        INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL
+) STRICT;
+
+CREATE UNIQUE INDEX uq_review_open ON review_items (target_type, target_id, kind)
+  WHERE status = 'open';
+CREATE INDEX idx_review_status ON review_items (status, created_at DESC);
+
+-- §17.2: "Durable work state; recover interrupted leases." This is the queue that holds work while
+-- the model host is unreachable (§19.F).
+CREATE TABLE jobs (
+  id            TEXT PRIMARY KEY,
+  kind          TEXT NOT NULL,
+  dedupe_key    TEXT NOT NULL,
+  payload_json  TEXT NOT NULL DEFAULT '{}',
+  state         TEXT NOT NULL DEFAULT 'ready'
+                CHECK (state IN ('ready','leased','done','failed','cancelled')),
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  next_run_at   INTEGER NOT NULL,
+  lease_until   INTEGER,
+  last_error    TEXT,
+  error_code    TEXT,
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL
+) STRICT;
+
+-- One live job per unit of work, so a rescan that re-sees a message cannot queue it twice (§20).
+CREATE UNIQUE INDEX uq_jobs_active ON jobs (kind, dedupe_key)
+  WHERE state IN ('ready','leased');
+CREATE INDEX idx_jobs_runnable ON jobs (state, next_run_at);
+`;
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   Object.freeze({ version: 1, name: "ledger-foundation", sql: MIGRATION_001 }),
   Object.freeze({ version: 2, name: "inference-endpoints", sql: MIGRATION_002 }),
+  Object.freeze({ version: 3, name: "message-sources-and-jobs", sql: MIGRATION_003 }),
 ]);
 
 function checksumOf(migration: Migration): string {
