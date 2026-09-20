@@ -345,8 +345,60 @@ BEGIN
 END;
 `;
 
+/* -------------------------------------------------------------------------------------------- */
+/* 002 — inference endpoints (buildspec.md §17.2 `ai_endpoints`)                                  */
+/* -------------------------------------------------------------------------------------------- */
+
+const MIGRATION_002 = /* sql */ `
+-- buildspec.md §17.2: "Exactly one active extraction role and one active agent role; extraction
+-- model identity is locked." §7.2 requires two independent configurations with separate clients.
+CREATE TABLE ai_endpoints (
+  role            TEXT PRIMARY KEY CHECK (role IN ('extraction','agent')),
+  provider_kind   TEXT NOT NULL CHECK (provider_kind IN ('openai-compatible','ollama-native')),
+  base_url        TEXT NOT NULL,
+  -- buildspec.md §17.2: credentials live behind a secret-storage abstraction, never in this row.
+  credential_ref  TEXT,
+  model_name      TEXT,
+  -- §7.2: "Save its digest and parser/prompt version with each extraction."
+  model_digest    TEXT,
+  quantization    TEXT,
+  parameter_size  TEXT,
+  context_limit   INTEGER,
+  options_json    TEXT NOT NULL DEFAULT '{}',
+  allowlist_json  TEXT NOT NULL DEFAULT '{}',
+  model_locked    INTEGER NOT NULL DEFAULT 0 CHECK (model_locked IN (0,1)),
+  last_test_at    INTEGER,
+  last_test_ok    INTEGER CHECK (last_test_ok IN (0,1)),
+  last_test_detail TEXT,
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL,
+  revision        INTEGER NOT NULL DEFAULT 1
+) STRICT;
+
+-- A record of every connection test, so "it worked yesterday" is checkable rather than remembered.
+--
+-- The role column deliberately carries NO foreign key to ai_endpoints. The owner tests a host
+-- BEFORE saving it, which is the whole point of the button, so the endpoint row usually does not
+-- exist yet when the first test is logged. A reference would reject exactly the attempts most worth
+-- recording, including the failed ones.
+CREATE TABLE ai_endpoint_tests (
+  id            TEXT PRIMARY KEY,
+  role          TEXT NOT NULL CHECK (role IN ('extraction','agent')),
+  base_url      TEXT NOT NULL,
+  provider_kind TEXT,
+  ok            INTEGER NOT NULL CHECK (ok IN (0,1)),
+  detail        TEXT NOT NULL,
+  model_count   INTEGER,
+  latency_ms    INTEGER,
+  tested_at     INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX idx_endpoint_tests_role ON ai_endpoint_tests (role, tested_at DESC);
+`;
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   Object.freeze({ version: 1, name: "ledger-foundation", sql: MIGRATION_001 }),
+  Object.freeze({ version: 2, name: "inference-endpoints", sql: MIGRATION_002 }),
 ]);
 
 function checksumOf(migration: Migration): string {
