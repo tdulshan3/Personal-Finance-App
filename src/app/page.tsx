@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import type { Money } from "../core/domain/money.ts";
 import { formatMoney, requireCurrency } from "../core/domain/money.ts";
+import { createCardDueService } from "../core/services/card-dues.ts";
 import { createDashboardService, resolvePeriod } from "../core/services/dashboard-service.ts";
 import { localDateOf } from "../core/domain/time.ts";
 import { backgroundStatus, currentProcessor } from "../server/background.ts";
@@ -40,7 +41,6 @@ export default async function HomePage({
   if (access.kind !== "ready") redirect("/unlock");
 
   const service = requireService();
-  const totals = service.homeTotals();
   const today = localDateOf(Date.now(), service.zone);
 
   const params = await searchParams;
@@ -77,8 +77,36 @@ export default async function HomePage({
   const inbox = currentProcessor()?.counts() ?? { staged: 0, waitingForModel: 0, openReviews: 0 };
   const capture = backgroundStatus();
 
-  const liquidEntries = [...totals.liquid.entries()];
-  const owedEntries = [...totals.owed.entries()].filter(([, value]) => value.minor !== 0n);
+  /*
+   * Total balance, per currency: every account the owner holds, less what is on their cards. The
+   * unused part of a credit limit is shown beside it but never added in — it is the bank's money,
+   * and counting it would make the total rise every time a limit is raised (buildspec.md §10).
+   */
+  const byCurrency = new Map<string, { assets: bigint; owed: bigint; available: bigint; hasCards: boolean; hasLimit: boolean }>();
+  for (const { account, balance, available } of accounts) {
+    const slot = byCurrency.get(account.currency.code) ?? { assets: 0n, owed: 0n, available: 0n, hasCards: false, hasLimit: false };
+    if (account.kind === "liability") {
+      slot.owed += balance.minor;
+      slot.hasCards = true;
+      if (available) {
+        slot.available += available.minor;
+        slot.hasLimit = true;
+      }
+    } else if (account.kind === "asset") slot.assets += balance.minor;
+    byCurrency.set(account.currency.code, slot);
+  }
+  const worth = [...byCurrency.entries()].map(([code, slot]) => {
+    const unit = requireCurrency(code);
+    return {
+      code,
+      total: { currency: unit, minor: slot.assets - slot.owed },
+      assets: { currency: unit, minor: slot.assets },
+      owed: { currency: unit, minor: slot.owed },
+      available: slot.hasLimit ? { currency: unit, minor: slot.available } : null,
+      hasCards: slot.hasCards,
+    };
+  });
+  const cardDues = createCardDueService({ db: requireDb(), service }).list(today).filter((due) => due.owed.minor > 0n);
 
   return (
     <Shell>
@@ -102,38 +130,40 @@ export default async function HomePage({
       />
 
       <Card tone="glass">
-        <div style={{ display: "grid", gap: "var(--space-5)" }}>
-          <Stat
-            label="Recorded liquid money"
-            value={
-              liquidEntries.length === 0 ? (
-                <span style={{ color: "var(--text-secondary)" }}>No accounts yet</span>
-              ) : (
-                /* buildspec.md §9.1: currencies are reported separately, never summed. */
-                <div style={{ display: "grid", gap: "var(--space-1)" }}>
-                  {liquidEntries.map(([code, value]) => (
-                    <Amount key={code} value={value} emphasis="large" srLabel="liquid balance" />
-                  ))}
+        {worth.length === 0 ? (
+          <Stat label="Total balance" value={<span style={{ color: "var(--text-secondary)" }}>No accounts yet</span>} />
+        ) : (
+          <div style={{ display: "grid", gap: "var(--space-5)" }}>
+            {/* buildspec.md §9.1: currencies are reported separately, never summed. */}
+            {worth.map((row) => (
+              <div key={row.code} style={{ display: "grid", gap: "var(--space-4)" }}>
+                <Stat
+                  label="Total balance"
+                  value={<Amount value={row.total} emphasis="large" srLabel="total balance across all accounts" />}
+                  hint={row.owed.minor > 0n ? "Everything in your accounts, less what is on your cards." : "Everything in your accounts."}
+                />
+                <div className={styles.split}>
+                  <div>
+                    <span className={styles.kpiLabel}>In accounts</span>
+                    <Amount value={row.assets} srLabel="in accounts" />
+                  </div>
+                  {row.hasCards ? (
+                    <div>
+                      <span className={styles.kpiLabel}>On credit cards</span>
+                      <Amount value={row.owed} srLabel="current balance on credit cards" />
+                    </div>
+                  ) : null}
+                  {row.available ? (
+                    <div>
+                      <span className={styles.kpiLabel}>Credit available</span>
+                      <Amount value={row.available} emphasis="muted" srLabel="credit still available" />
+                    </div>
+                  ) : null}
                 </div>
-              )
-            }
-            hint="Cash and current accounts. Savings and credit limits are not included."
-          />
-
-          {owedEntries.length > 0 ? (
-            <Stat
-              label="Amount owed"
-              value={
-                <div style={{ display: "grid", gap: "var(--space-1)" }}>
-                  {owedEntries.map(([code, value]) => (
-                    <Amount key={code} value={value} srLabel="amount owed" />
-                  ))}
-                </div>
-              }
-              hint="Credit cards and loans."
-            />
-          ) : null}
-        </div>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
 
       <nav aria-label="Period" className={styles.segments}>
@@ -316,6 +346,23 @@ export default async function HomePage({
                 </span>
                 <Badge tone="primary">Review</Badge>
               </Link>
+            </Card>
+          ) : null}
+
+          {cardDues.length > 0 ? (
+            <Card order={0} title="Upcoming" action={<Link href="/bills">Bills</Link>}>
+              <List>
+                {cardDues.map((due) => (
+                  <ListRow
+                    key={due.account.id}
+                    href="/bills"
+                    subtitle={due.dueOn ? `Card payment · due ${due.dueOn}${due.daysLeft !== null ? ` · ${due.daysLeft} days` : ""}` : "Card payment · next month · set the due day"}
+                    trailing={<Amount value={due.owed} srLabel="owed" />}
+                  >
+                    {due.account.name}
+                  </ListRow>
+                ))}
+              </List>
             </Card>
           ) : null}
 

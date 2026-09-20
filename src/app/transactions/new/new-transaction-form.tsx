@@ -21,14 +21,17 @@ export function NewTransactionForm({
   accounts,
   categories,
   today,
+  initial,
 }: {
   accounts: readonly AccountOption[];
   categories: readonly { id: string; name: string }[];
   today: string;
+  /** Pre-filled from a link such as Bills' "Record payment". Every field stays editable. */
+  initial?: { kind?: string | undefined; fromAccountId?: string | undefined; toAccountId?: string | undefined; amount?: string | undefined } | undefined;
 }) {
   const [state, formAction, isPending] = useActionState<ActionState, FormData>(createTransactionAction, {});
-  const [kind, setKind] = useState<string>("expense");
-  const [accountId, setAccountId] = useState<string>(accounts[0]?.id ?? "");
+  const [kind, setKind] = useState<string>(initial?.kind ?? "expense");
+  const [accountId, setAccountId] = useState<string>(initial?.fromAccountId ?? accounts[0]?.id ?? "");
 
   /*
    * buildspec.md §16 requires an idempotency key per mutation. Generating it once per mounted form
@@ -109,7 +112,7 @@ export function NewTransactionForm({
               hint="Paying a credit card is a transfer, not a second expense."
             >
               {({ id, describedBy }) => (
-                <Select id={id} name="toAccountId" describedBy={describedBy} required>
+                <Select id={id} name="toAccountId" defaultValue={initial?.toAccountId ?? ""} describedBy={describedBy} required>
                   {accounts
                     .filter((account) => account.id !== accountId)
                     .map((account) => (
@@ -130,6 +133,7 @@ export function NewTransactionForm({
                 currencyCode={currency}
                 required
                 placeholder="0.00"
+                defaultValue={initial?.amount ?? ""}
                 describedBy={describedBy}
               />
             )}
