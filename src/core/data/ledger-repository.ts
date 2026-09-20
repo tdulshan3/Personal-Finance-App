@@ -45,6 +45,14 @@ function mapAccount(row: Row): LedgerAccount {
     liquidityRole: asText(row.liquidity_role, "liquidity_role") as LiquidityRole,
     institution: asOptionalText(row.institution, "institution"),
     trackingStartAt: asOptionalNumber(row.tracking_start_at, "tracking_start_at"),
+    ...(row.credit_limit_minor === null || row.credit_limit_minor === undefined
+      ? {}
+      : {
+          creditLimit: money(
+            requireCurrency(asText(row.currency, "currency")),
+            asBigInt(row.credit_limit_minor, "credit_limit_minor"),
+          ),
+        }),
     revision: asNumber(row.revision, "revision"),
     archivedAt: asOptionalNumber(row.archived_at, "archived_at"),
   };
@@ -122,6 +130,7 @@ export type AccountInput = {
   readonly isUserVisible?: boolean;
   readonly institution?: string | undefined;
   readonly trackingStartAt?: Instant | undefined;
+  readonly creditLimitMinor?: bigint | undefined;
 };
 
 export type ApplyPlanOptions = {
@@ -154,6 +163,83 @@ export function createLedgerRepository(db: Db) {
     return row ? mapAccount(row) : undefined;
   }
 
+  /**
+   * Updates the owner-editable fields of an account.
+   *
+   * buildspec.md §16: "Financial writes check expected record revisions." Renaming is not a
+   * financial write, but the same check applies so two open tabs cannot silently overwrite each
+   * other. Nothing here can change the account's currency or kind: the journals already posted to
+   * it assume both, and §17.3 rejects a journal whose account currency differs.
+   */
+  function updateAccount(input: {
+    id: string;
+    expectedRevision: number;
+    name?: string | undefined;
+    institution?: string | null | undefined;
+    creditLimitMinor?: bigint | null | undefined;
+    liquidityRole?: LiquidityRole | undefined;
+    now: Instant;
+  }): LedgerAccount {
+    const current = findAccount(input.id);
+    if (!current) throw notFound("Ledger account", input.id);
+    if (current.revision !== input.expectedRevision) {
+      throw validationError(
+        `This account changed since it was loaded (expected revision ${input.expectedRevision}, ` +
+          `found ${current.revision}). Reload and try again.`,
+        { account_id: input.id },
+      );
+    }
+
+    const name = input.name === undefined ? current.name : input.name.trim();
+    if (name.length === 0) throw validationError("Account name is required");
+
+    db.prepare(
+      `UPDATE ledger_accounts
+          SET name = ?, institution = ?, credit_limit_minor = ?, liquidity_role = ?,
+              updated_at = ?, revision = revision + 1
+        WHERE id = ?`,
+    ).run(
+      name,
+      input.institution === undefined ? (current.institution ?? null) : input.institution,
+      input.creditLimitMinor === undefined
+        ? (current.creditLimit?.minor ?? null)
+        : input.creditLimitMinor,
+      input.liquidityRole ?? current.liquidityRole,
+      input.now,
+      input.id,
+    );
+    return findAccount(input.id)!;
+  }
+
+  /**
+   * buildspec.md §13: "Accounts with history are archived, not physically removed by ordinary
+   * CRUD." Archiving is reversible; the rows and every journal posted to them stay exactly where
+   * they are.
+   */
+  function setAccountArchived(id: string, archived: boolean, now: Instant): LedgerAccount {
+    const current = findAccount(id);
+    if (!current) throw notFound("Ledger account", id);
+    db.prepare(
+      "UPDATE ledger_accounts SET archived_at = ?, updated_at = ?, revision = revision + 1 WHERE id = ?",
+    ).run(archived ? now : null, now, id);
+    return findAccount(id)!;
+  }
+
+  /** How many journal entries reference this account, so the UI can say what archiving preserves. */
+  function accountUsage(id: string): { entries: number; transactions: number } {
+    const row = db
+      .prepare(
+        `SELECT COUNT(*) AS entries, COUNT(DISTINCT j.transaction_id) AS transactions
+           FROM journal_entries e JOIN journals j ON j.id = e.journal_id
+          WHERE e.ledger_account_id = ?`,
+      )
+      .get(id) as Record<string, unknown>;
+    return {
+      entries: asNumber(row.entries, "entries"),
+      transactions: asNumber(row.transactions, "transactions"),
+    };
+  }
+
   function listAccounts(options: { includeArchived?: boolean; includeInternal?: boolean } = {}) {
     const clauses: string[] = [];
     if (!options.includeArchived) clauses.push("archived_at IS NULL");
@@ -183,6 +269,12 @@ export function createLedgerRepository(db: Db) {
       now,
       now,
     );
+    if (input.creditLimitMinor !== undefined && input.creditLimitMinor !== null) {
+      db.prepare("UPDATE ledger_accounts SET credit_limit_minor = ? WHERE id = ?").run(
+        input.creditLimitMinor,
+        input.id,
+      );
+    }
     return findAccount(input.id)!;
   }
 
@@ -514,6 +606,9 @@ export function createLedgerRepository(db: Db) {
     findAccount,
     listAccounts,
     insertAccount,
+    updateAccount,
+    setAccountArchived,
+    accountUsage,
     categoryAccountFor,
     systemAccountFor,
     balanceOf,

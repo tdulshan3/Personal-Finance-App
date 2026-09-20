@@ -1,12 +1,13 @@
 import { redirect } from "next/navigation";
 
-import { AccountKind } from "../../core/domain/ledger.ts";
-import { SUPPORTED_CURRENCIES } from "../../core/domain/money.ts";
+import { SUPPORTED_CURRENCIES, formatMoney, isNegative } from "../../core/domain/money.ts";
 import { localDateOf } from "../../core/domain/time.ts";
 import { requireService } from "../../server/runtime.ts";
 import { accessState } from "../../server/session.ts";
 import { labelForAccountType } from "../../ui/labels.ts";
-import { Amount, Badge, Card, EmptyState, PageHeader, Shell } from "../../ui/primitives.tsx";
+import { Card, EmptyState, PageHeader, Shell } from "../../ui/primitives.tsx";
+import type { AccountRowData } from "./account-row.tsx";
+import { AccountRow } from "./account-row.tsx";
 import { NewAccountForm } from "./new-account-form.tsx";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +17,8 @@ export const dynamic = "force-dynamic";
  *
  * buildspec.md §13: "Add/edit/archive bank, cash, wallet and card accounts; map masked identifiers;
  * display balance type, freshness and tracking start; reconcile." Alias mapping and reconciliation
- * arrive with M2 and M4; what is here is labelled for what it actually is — a recorded balance, not
- * a live bank balance (§13: "Avoid presenting a stale SMS-derived balance as a live bank balance").
+ * belong to M2 and M4. What is here is labelled for what it is — a recorded balance, not a live
+ * bank balance (§13: "Avoid presenting a stale SMS-derived balance as a live bank balance").
  */
 export default async function AccountsPage() {
   const access = await accessState();
@@ -25,8 +26,33 @@ export default async function AccountsPage() {
   if (access.kind !== "ready") redirect("/unlock");
 
   const service = requireService();
-  const balances = service.accountBalances();
+  const rows = service.accountBalances({ includeArchived: true });
   const today = localDateOf(Date.now(), service.zone);
+
+  const active = rows.filter((r) => r.account.archivedAt === undefined);
+  const archived = rows.filter((r) => r.account.archivedAt !== undefined);
+
+  const toRowData = (row: (typeof rows)[number]): AccountRowData => ({
+    id: row.account.id,
+    name: row.account.name,
+    kind: row.account.kind,
+    type: row.account.type,
+    typeLabel: labelForAccountType(row.account.type),
+    currency: row.account.currency.code,
+    institution: row.account.institution ?? null,
+    revision: row.account.revision,
+    archived: row.account.archivedAt !== undefined,
+    balanceText: formatMoney(row.balance),
+    balanceIsNegative: isNegative(row.balance),
+    creditLimitText: row.account.creditLimit ? formatMoney(row.account.creditLimit) : null,
+    // The edit field wants a plain number, not the display form with its currency code.
+    creditLimitValue: row.account.creditLimit
+      ? formatMoney(row.account.creditLimit, { withCode: false, grouping: false })
+      : null,
+    availableText: row.available ? formatMoney(row.available) : null,
+    utilisationPercent: row.utilisation === undefined ? null : Math.round(row.utilisation * 100),
+    entries: service.accountUsage(row.account.id).entries,
+  });
 
   return (
     <Shell>
@@ -35,61 +61,36 @@ export default async function AccountsPage() {
         subtitle="Recorded balances, calculated from what this app knows."
       />
 
-      {balances.length === 0 ? (
+      {active.length === 0 ? (
         <Card>
           <EmptyState
             title="No accounts yet"
-            body="Add the accounts you want to track. You can supply a verified opening balance now or later."
+            body="Add the accounts you want to track. You can supply a verified balance now or later."
           />
         </Card>
       ) : (
         <Card title="Your accounts">
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "var(--space-4)" }}>
-            {balances.map(({ account, balance }) => (
-              <li
-                key={account.id}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  gap: "var(--space-4)",
-                }}
-              >
-                <div style={{ display: "grid", gap: "var(--space-1)" }}>
-                  <span style={{ fontWeight: 560 }}>{account.name}</span>
-                  <span style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
-                    {labelForAccountType(account.type)} · {account.currency.code}
-                    {account.institution ? ` · ${account.institution}` : ""}
-                  </span>
-                  <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
-                    {account.kind === AccountKind.LIABILITY ? (
-                      <Badge tone="warning">
-                        {balance.minor < 0n ? "In credit" : "Amount owed"}
-                      </Badge>
-                    ) : null}
-                    {account.trackingStartAt ? (
-                      <Badge>
-                        Tracked from {localDateOf(account.trackingStartAt, service.zone)}
-                      </Badge>
-                    ) : null}
-                  </div>
-                </div>
-                <div style={{ display: "grid", gap: "2px", justifyItems: "end" }}>
-                  <Amount
-                    value={balance}
-                    srLabel={
-                      account.kind === AccountKind.LIABILITY ? "amount owed" : "recorded balance"
-                    }
-                  />
-                  <span style={{ fontSize: "var(--font-xs)", color: "var(--text-secondary)" }}>
-                    Recorded balance
-                  </span>
-                </div>
-              </li>
+            {active.map((row) => (
+              <AccountRow key={row.account.id} data={toRowData(row)} />
             ))}
           </ul>
         </Card>
       )}
+
+      {archived.length > 0 ? (
+        <Card title="Archived">
+          <p style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)", marginBottom: "var(--space-4)" }}>
+            These keep every transaction recorded against them, and their balances still compute.
+            They simply do not accept new entries.
+          </p>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "var(--space-4)" }}>
+            {archived.map((row) => (
+              <AccountRow key={row.account.id} data={toRowData(row)} />
+            ))}
+          </ul>
+        </Card>
+      ) : null}
 
       <Card title="Add an account">
         <NewAccountForm currencies={SUPPORTED_CURRENCIES.map((c) => c.code)} today={today} />

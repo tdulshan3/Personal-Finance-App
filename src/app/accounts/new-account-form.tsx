@@ -84,6 +84,23 @@ export function NewAccountForm({
           )}
         </Field>
 
+        {isDebt ? (
+          <Field
+            label="Credit limit (optional)"
+            hint="Used to show what is left to spend. It is not money you have, and never counts toward your balance."
+          >
+            {({ id, describedBy }) => (
+              <MoneyInput
+                id={id}
+                name="creditLimit"
+                currencyCode={currency}
+                placeholder="0.00"
+                describedBy={describedBy}
+              />
+            )}
+          </Field>
+        ) : null}
+
         <Field label="Institution (optional)">
           {({ id, describedBy }) => (
             <TextInput id={id} name="institution" maxLength={80} describedBy={describedBy} />
