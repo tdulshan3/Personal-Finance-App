@@ -31,7 +31,7 @@ import {
 import type { Clock, FinancialTime, Instant, LocalDate } from "../domain/time.ts";
 import { SUGGESTED_DEFAULT_ZONE, systemClock } from "../domain/time.ts";
 import type { AccountingScope } from "../domain/transaction.ts";
-import { TransactionStatus } from "../domain/transaction.ts";
+import { TransactionKind, TransactionStatus } from "../domain/transaction.ts";
 
 /**
  * The typed application services of buildspec.md §3 and §16.
@@ -421,8 +421,35 @@ export function createFinanceService(options: FinanceServiceOptions) {
     write: WriteOptions = {},
   ) {
     const snapshot = repo.snapshotOf(input.transactionId);
+    if (snapshot.transaction.kind !== TransactionKind.EXPENSE) {
+      throw validationError("Only an expense record can be edited as an expense", {
+        transaction_id: input.transactionId,
+        kind: snapshot.transaction.kind,
+      });
+    }
     const account = repo.findAccount(input.accountId);
     if (!account) throw notFound("Account", input.accountId);
+    /*
+     * The same guards `planCreateExpense` applies. Without them an edit could produce what a create
+     * refuses: a negative amount balances perfectly while posting backwards, turning an expense
+     * into money arriving, and a system account has no business paying for groceries.
+     */
+    if (!account.isUserVisible || (account.kind !== AccountKind.ASSET && account.kind !== AccountKind.LIABILITY)) {
+      throw validationError("An expense must be paid from one of your own accounts", { account_id: account.id });
+    }
+    if (account.currency.code !== input.amount.currency.code) {
+      throw validationError(
+        `Paying account '${account.name}' holds ${account.currency.code} but the amount is ${input.amount.currency.code}`,
+        { account_id: account.id },
+      );
+    }
+    if (input.amount.minor <= 0n) {
+      throw validationError("An expense must be a positive amount", { amount: input.amount.minor.toString() });
+    }
+    if (input.splits.length === 0) throw validationError("At least one category line is required");
+    if (input.splits.some((split) => split.amount.minor <= 0n)) {
+      throw validationError("Each split line must be a positive amount");
+    }
 
     const splitTotal = input.splits.reduce((acc, s) => acc + s.amount.minor, 0n);
     if (splitTotal !== input.amount.minor) {
@@ -442,6 +469,93 @@ export function createFinanceService(options: FinanceServiceOptions) {
         memo: split.memo,
       })),
       { accountId: account.id, amountMinorSigned: -input.amount.minor },
+    ];
+
+    const plan = planEditFinancials(context, {
+      snapshot,
+      expectedRevision: input.expectedRevision,
+      legs,
+      amount: input.amount,
+      occurredAt: input.occurredAt,
+      merchantName: input.merchantName,
+      categoryId: input.splits.length === 1 ? input.splits[0]?.categoryId : undefined,
+      notes: input.notes,
+      ...actorFields(write),
+    });
+    return commit(plan, "transaction.edit", input, write);
+  }
+
+  /**
+   * Edits the financial fields of posted income: the mirror image of `editExpense`.
+   *
+   * buildspec.md §9.2, row 2: income debits the asset and credits the income category account, so
+   * the replacement legs carry the opposite signs to an expense. The guards repeat what
+   * `planCreateIncome` enforces, so an edit cannot produce a record a create would have refused —
+   * in particular a negative amount, which would balance perfectly while posting backwards.
+   */
+  function editIncome(
+    input: {
+      transactionId: string;
+      expectedRevision: number;
+      accountId: string;
+      amount: Money;
+      occurredAt: FinancialTime;
+      splits: readonly CategorySplit[];
+      merchantName?: string | undefined;
+      notes?: string | undefined;
+    },
+    write: WriteOptions = {},
+  ) {
+    const snapshot = repo.snapshotOf(input.transactionId);
+    if (snapshot.transaction.kind !== TransactionKind.INCOME) {
+      throw validationError("Only an income record can be edited as income", {
+        transaction_id: input.transactionId,
+        kind: snapshot.transaction.kind,
+      });
+    }
+
+    const account = repo.findAccount(input.accountId);
+    if (!account) throw notFound("Account", input.accountId);
+    if (account.kind !== AccountKind.ASSET) {
+      throw validationError(`Income must be received into an asset account, not a ${account.kind}`, {
+        account_id: account.id,
+      });
+    }
+    if (account.currency.code !== input.amount.currency.code) {
+      throw validationError(
+        `Receiving account '${account.name}' holds ${account.currency.code} but the amount is ` +
+          `${input.amount.currency.code}`,
+        { account_id: account.id },
+      );
+    }
+    if (input.amount.minor <= 0n) {
+      throw validationError("Income must be a positive amount", {
+        amount: input.amount.minor.toString(),
+      });
+    }
+    if (input.splits.length === 0) throw validationError("At least one category line is required");
+    if (input.splits.some((split) => split.amount.minor <= 0n)) {
+      throw validationError("Each split line must be a positive amount");
+    }
+
+    const splitTotal = input.splits.reduce((acc, s) => acc + s.amount.minor, 0n);
+    if (splitTotal !== input.amount.minor) {
+      throw validationError("Split lines must total the transaction amount");
+    }
+
+    const legs = [
+      { accountId: account.id, amountMinorSigned: input.amount.minor },
+      ...input.splits.map((split) => ({
+        accountId: repo.categoryAccountFor(
+          split.categoryId,
+          input.amount.currency,
+          AccountKind.INCOME,
+          clock.now(),
+        ),
+        amountMinorSigned: -split.amount.minor,
+        categoryId: split.categoryId,
+        memo: split.memo,
+      })),
     ];
 
     const plan = planEditFinancials(context, {
@@ -673,11 +787,49 @@ export function createFinanceService(options: FinanceServiceOptions) {
         "SELECT * FROM transaction_revisions WHERE transaction_id = ? ORDER BY revision DESC",
       )
       .all(transactionId) as Record<string, unknown>[];
+
+    /*
+     * The owner-facing accounts this record touches, with which way the money went. A record in
+     * Trash owns no active journal — its deleted revision has no `journalId` — so fall back to the
+     * journal the deletion reversed. Otherwise Trash could not say which account a restore would
+     * put the money back into.
+     */
+    let accountJournal = snapshot.currentJournal;
+    if (!accountJournal) {
+      const reversalRow = db
+        .prepare(
+          `SELECT reverses_journal_id FROM journals
+            WHERE transaction_id = ? AND purpose = 'deletion_reversal'
+            ORDER BY recorded_at DESC LIMIT 1`,
+        )
+        .get(transactionId) as Record<string, unknown> | undefined;
+      const reversedId = reversalRow
+        ? asOptionalText(reversalRow.reverses_journal_id, "reverses_journal_id")
+        : undefined;
+      accountJournal = reversedId ? repo.findJournal(reversedId) : undefined;
+    }
+
+    const netByAccount = new Map<string, bigint>();
+    for (const entry of accountJournal?.entries ?? []) {
+      netByAccount.set(
+        entry.accountId,
+        (netByAccount.get(entry.accountId) ?? 0n) + entry.amountMinorSigned,
+      );
+    }
+    const accounts: { id: string; name: string; direction: "in" | "out" }[] = [];
+    for (const [accountId, net] of netByAccount) {
+      const account = repo.findAccount(accountId);
+      if (!account?.isUserVisible) continue;
+      // Debit-positive: a debit is money arriving in an asset, or debt being paid down on a card.
+      accounts.push({ id: account.id, name: account.name, direction: net >= 0n ? "in" : "out" });
+    }
+
     return {
       transaction: snapshot.transaction,
       currentRevision: snapshot.currentRevision,
       journal: snapshot.currentJournal,
       revisionCount: revisionRows.length,
+      accounts,
     };
   }
 
@@ -702,6 +854,7 @@ export function createFinanceService(options: FinanceServiceOptions) {
     createRefund,
     recordUnknownAdjustment,
     editExpense,
+    editIncome,
     deleteTransaction,
     restoreTransaction,
     searchTransactions,
