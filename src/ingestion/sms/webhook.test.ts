@@ -299,7 +299,7 @@ describe("adopting a secret the collector already has", () => {
   test("a pasted secret is used verbatim, so both sides sign the same way", async () => {
     const db = await freshDb();
     // 32 hex characters: what the collector app generates.
-    const theirs = "8cd94f7b19a28389dbca53008f7fd1d4";
+    const theirs = "0123456789abcdef0123456789abcdef";
     const config = setWebhookSecret(db, theirs, Date.now());
 
     assert.equal(config.secret, theirs);
@@ -314,9 +314,9 @@ describe("adopting a secret the collector already has", () => {
   // 401 that looks like the wrong secret entirely.
   test("surrounding whitespace is trimmed, inner whitespace is refused", async () => {
     const db = await freshDb();
-    const theirs = "8cd94f7b19a28389dbca53008f7fd1d4";
+    const theirs = "0123456789abcdef0123456789abcdef";
     assert.equal(setWebhookSecret(db, `  ${theirs}  `, Date.now()).secret, theirs);
-    assert.throws(() => setWebhookSecret(db, "8cd94f7b 19a28389dbca53008f7fd1d4", Date.now()),
+    assert.throws(() => setWebhookSecret(db, "01234567 89abcdef0123456789abcdef", Date.now()),
                   /must not contain spaces/);
     db.close();
   });
@@ -335,7 +335,7 @@ describe("adopting a secret the collector already has", () => {
    * to matter more than the traffic being readable.
    */
   test("128 bits is not flagged; less than that is", () => {
-    assert.equal(isWeakSecret("8cd94f7b19a28389dbca53008f7fd1d4"), false, "32 hex chars = 128 bits");
+    assert.equal(isWeakSecret("0123456789abcdef0123456789abcdef"), false, "32 hex chars = 128 bits");
     assert.equal(isWeakSecret("a".repeat(64)), false, "64 chars, as generated here");
     assert.equal(isWeakSecret("a".repeat(20)), true, "20 chars");
   });
@@ -343,7 +343,7 @@ describe("adopting a secret the collector already has", () => {
   test("adopting one replaces whatever was there", async () => {
     const db = await freshDb();
     const generated = generateWebhookSecret(db, Date.now());
-    const adopted = setWebhookSecret(db, "8cd94f7b19a28389dbca53008f7fd1d4", Date.now());
+    const adopted = setWebhookSecret(db, "0123456789abcdef0123456789abcdef", Date.now());
     assert.notEqual(adopted.secret, generated.secret);
 
     const body = JSON.stringify(PAYLOAD);
