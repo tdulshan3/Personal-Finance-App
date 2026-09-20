@@ -16,6 +16,7 @@ import {
 } from "../core/security/passphrase.ts";
 import type { FinanceService } from "../core/services/finance-service.ts";
 import { createFinanceService } from "../core/services/finance-service.ts";
+import { startBackground, stopBackground } from "./background.ts";
 import type { VaultMetadata } from "./vault.ts";
 import { databaseFile, freshVault, readVault, vaultExists, writeVault } from "./vault.ts";
 
@@ -146,6 +147,7 @@ export async function initialise(input: {
     unlockedAt: Date.now(),
     sessionToken: randomBytes(32),
   });
+  startBackground({ db, zone });
 }
 
 /**
@@ -181,11 +183,14 @@ export async function unlock(passphrase: string): Promise<void> {
     unlockedAt: Date.now(),
     sessionToken: randomBytes(32),
   });
+  startBackground({ db, zone: vault.zone });
 }
 
 /** buildspec.md §18: "a manual 'Lock now'". Drops the key and closes the database. */
 export function lock(reason?: string): void {
   const state = current();
+  // Stop background work first, so nothing is mid-write when the handle closes.
+  stopBackground();
   if (state.status === "unlocked") {
     try {
       state.db.close();

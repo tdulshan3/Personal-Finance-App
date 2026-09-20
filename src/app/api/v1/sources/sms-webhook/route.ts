@@ -6,6 +6,7 @@ import {
   stageWebhookMessage,
   verifySignature,
 } from "../../../../../ingestion/sms/webhook.ts";
+import { kickProcessing } from "../../../../../server/background.ts";
 import { isUnlocked, requireDb } from "../../../../../server/runtime.ts";
 
 export const dynamic = "force-dynamic";
@@ -73,6 +74,9 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const result = stageWebhookMessage(requireDb(), config, payload, Date.now());
     noteWebhookDelivery(requireDb(), payload.from, Date.now());
+    // Parse it now rather than on the next minute tick. Fire-and-forget: the collector gets its
+    // 200 as soon as the message is durably staged, never after a model call.
+    if (result.staged) kickProcessing();
     return Response.json({ accepted: 1, staged: result.staged, reason: result.reason }, { status: 200 });
   } catch (error) {
     // A 5xx tells the collector to retry; the message is still on its phone either way.
