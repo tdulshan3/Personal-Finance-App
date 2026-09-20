@@ -6,6 +6,7 @@ import { accessState } from "../../server/session.ts";
 import { headers } from "next/headers";
 
 import { Badge, Card, PageHeader, Shell } from "../../ui/primitives.tsx";
+import { BackupSection } from "./backup-section.tsx";
 import { EndpointCard } from "./endpoint-card.tsx";
 import { smsOverview } from "./sms-actions.ts";
 import { SmsCard } from "./sms-card.tsx";
@@ -94,6 +95,8 @@ export default async function SettingsPage() {
           </div>
         </div>
       </Card>
+
+      <BackupSection />
     </Shell>
   );
 }
