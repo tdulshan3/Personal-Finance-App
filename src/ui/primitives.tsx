@@ -204,11 +204,19 @@ export function Shell({
 export function Columns({
   children,
   layout = "main-aside",
+  flip = false,
 }: {
   children: ReactNode;
   layout?: "main-aside" | "aside-main" | "halves" | "thirds" | undefined;
+  /**
+   * Draw the first stack on the right instead of the left. For when reading order and visual order
+   * want different things: a filter panel should come *first* for the keyboard and a screen reader
+   * (nobody should tab through a hundred rows to reach Search), yet sit to the right of the list it
+   * filters. Write `layout="aside-main" flip` with the filters as the first `Stack`.
+   */
+  flip?: boolean | undefined;
 }) {
-  return <div className={cx("columns", `columns-${layout}`)}>{children}</div>;
+  return <div className={cx("columns", `columns-${layout}`, flip && "columns-flip")}>{children}</div>;
 }
 
 /** One column inside `Columns`. `sticky` keeps a short column in view beside a long one. */
