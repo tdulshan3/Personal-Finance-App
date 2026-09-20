@@ -38,28 +38,35 @@ longer applies, the *requirement* is restated rather than dropped.
 |---|---|---|
 | [M0 — Foundation and device capability spike](#m0--foundation-and-device-capability-spike) | 🟡 | ⬜ Not met |
 | [M1 — Accurate offline manual finance](#m1--accurate-offline-manual-finance) | 🟡 | ⬜ Not met |
-| [M2 — SMS history and live ingestion](#m2--sms-history-and-live-ingestion) | 🟡 | ⬜ Not met |
+| [M2 — SMS history and live ingestion](#m2--sms-history-and-live-ingestion) | 🟡 | 🟡 Live capture to review works; history import has no UI |
 | [M3 — Gmail and cross-source matching](#m3--gmail-and-cross-source-matching) | ⬜ | ⬜ Not met |
 | [M4 — Reconciliation and bills](#m4--reconciliation-and-bills) | 🟡 | ⬜ Not met |
 | [M5 — Forecast and savings](#m5--forecast-and-savings) | ⬜ | ⬜ Not met |
-| [M6 — Agent with independent model selection](#m6--agent-with-independent-model-selection) | ⬜ | ⬜ Not met |
+| [M6 — Agent with independent model selection](#m6--agent-with-independent-model-selection) | 🟡 | 🟡 Boundary tested with a scripted adversary; see ADR 0009 |
 | [M7 — Hardening and personal release](#m7--hardening-and-personal-release) | ⬜ | ⬜ Not met |
 
-**What exists and is verified today:**
+**What exists and is verified today** (last refreshed 2026-09-20):
 
-- the finance engine core — `src/core/domain/` (money, time, ledger, posting, transaction, errors);
-- the encrypted data layer — `src/core/data/` (driver, 18-table schema, migrations,
-  ledger repository) with the database proven encrypted on disk, journals immutable once posted and
-  audit events append-only;
-- passphrase-derived key handling — `src/core/security/passphrase.ts` (scrypt, verifier,
-  key wiping), matching [ADR 0003](adr/0003-sqlite-encryption-with-passphrase-derived-key.md);
-- the finance application service — `src/core/services/finance-service.ts` (accounts, posting,
-  edit/delete/restore, search, totals, idempotency);
-- OS-level SMS read capability on the device.
+- the finance engine core, encrypted data layer, passphrase-derived key handling and the finance
+  application service, as before, now including account CRUD with credit limits, expense *and*
+  income editing, Trash and restore;
+- the app running on the phone — Next.js standalone in Termux on the Galaxy S20, port 8090, in a
+  tmux session, listed on the termox dashboard ([termux-setup.md](termux-setup.md));
+- encrypted backup to a separately-passworded file, with download, from Settings;
+- **live SMS capture** from the owner's personal phone through an HMAC-signed webhook, staged
+  durably and deduplicated ([connect-sms-and-email.md](connect-sms-and-email.md));
+- **the message → review → transaction pipeline**: rules first, the fixed extractor for the
+  remainder when reachable, OTPs and promotions purged on sight, everything that could touch money
+  stopped at the Review screen, accepted exactly once with its evidence link;
+- **the Assistant**: rules-first answers with no model, tool calling against the owner's agent
+  model for the rest, and a proposal boundary only the owner's Confirm crosses
+  ([ADR 0009](adr/0009-assistant-rules-first-and-proposal-boundary.md));
+- an iOS-style interface across every screen, light and dark.
 
-**What does not exist:** the UI and server session layer are in flight and not committed. Ingestion,
-Gmail, bills, recurrence, forecast, savings and the agent are unwritten. There is no encrypted
-backup or restore. Nothing has run on the phone.
+**What does not exist:** Gmail, bills and recurrence, reconciliation, forecast and savings, SMS
+*history* import from the UI (the XML parser exists and is tested; nothing calls it), restore from a
+backup, and TLS — the transport is plain HTTP on the LAN by the owner's choice
+([ADR 0008](adr/0008-bind-the-ledger-to-the-lan.md)), which remains the top security item.
 
 ---
 
@@ -156,21 +163,22 @@ unchanged.
 | ☐ | Item | Status | Notes |
 |---|---|---|---|
 | ☐ | OS-level SMS read capability | ✅ | See M0. |
-| ☐ | Extraction schema and endpoint policy | 🟡 | `schema.ts`, `endpoint-policy.ts`, `prompt.ts`, `provider.ts`, `extraction-client.ts` and `validate-evidence.ts` all exist and typecheck. Not yet wired into any ingestion path, and no extraction has been run against the live endpoint from application code. |
-| ☐ | History import with sender/date filters and a preview count | ⬜ | Via `termux-sms-list` paging, filtered application-side. |
-| ☐ | Selected-file import (SMS Backup & Restore XML) | ⬜ | Mandatory fallback per §5.2. |
-| ☐ | Consent and filter preview | ⬜ | |
-| ☐ | Durable capture with staging before parsing | ⬜ | No `source_messages` table in the schema yet. |
-| ☐ | Multipart support | ➖ | The provider returns reassembled rows, so §5.5's `getMessagesFromIntent()` work does not apply. Nothing to do. |
-| ☐ | Recovery scans, overlap window, watermarks | ⬜ | More important here than in the buildspec's design: polling *guarantees* re-reads. |
-| ☐ | Coverage dashboard | ⬜ | Must show polling gaps and any period where Termux was dead. |
-| ☐ | Versioned parsers, fixed 0.8B fallback, evidence validation | 🟡 | Evidence-validation code exists but is uncommitted and untested. |
-| ☐ | Account mapping, review queue, duplicate candidates | ⬜ | `account_aliases` exists in the schema; nothing reads it. |
-| ☐ | Learnable merchant/category rules with explicit previews | ⬜ | |
+| ☐ | Extraction schema and endpoint policy | ✅ | Wired into `src/ingestion/processing.ts`; measured in [extraction-eval.md](extraction-eval.md). |
+| ☐ | History import with sender/date filters and a preview count | ⬜ | The capture app holds only `RECEIVE_SMS`, so it cannot read history. |
+| ☐ | Selected-file import (SMS Backup & Restore XML) | 🟡 | `src/ingestion/sms/xml-import.ts` parses, previews and imports, with tests. No screen calls it. |
+| ☐ | Consent and filter preview | 🟡 | Senders are discovered disabled; no body is stored until the owner enables one. |
+| ☐ | Durable capture with staging before parsing | ✅ | `source_messages`, staged before any parsing; webhook answers 503 while locked so the collector retries. |
+| ☐ | Multipart support | ➖ | The collector delivers reassembled text. |
+| ☐ | Recovery scans, overlap window, watermarks | 🟡 | Implemented for the Termux poller; the webhook path relies on the collector's retries instead. |
+| ☐ | Coverage dashboard | ⬜ | Home and Review show queue counts only. |
+| ☐ | Versioned parsers, fixed extractor fallback, evidence validation | ✅ | `rules-v1` (13/14 fixtures, ~6 ms) then `qwen-extract-v3`; every model field must be found in the source text. |
+| ☐ | Account mapping, review queue, duplicate candidates | ✅ | Suffix aliases remembered on accept; ±1 day same-amount duplicates shown as a *suggestion*. `src/ingestion/pipeline.test.ts`. |
+| ☐ | Learnable merchant/category rules with explicit previews | 🟡 | The last category used for a merchant is pre-selected; no rule editor. |
 
 **Gate — repeated/overlapping imports and simulated crashes produce no duplicate financial effects;
-live supported SMS capture works on a real device:** ⬜ **not met.** The capture *capability* is
-verified; no capture code exists.
+live supported SMS capture works on a real device:** 🟡 **partly met.** A redelivered message is
+deduplicated at staging and a double Accept posts once (both tested). Live capture was verified end
+to end from the owner's phone. Crash-mid-import is not simulated, and history import is not reachable.
 
 ---
 
@@ -230,18 +238,21 @@ and undo:** ⬜ not met.
 
 | ☐ | Item | Status |
 |---|---|---|
-| ☐ | Separate agent endpoint settings, independent of extraction | ⬜ |
-| ☐ | Model dropdown | ➖ — §14.1's `/api/tags` does not exist on llama.cpp. Needs its own ADR; see [adr/README.md](adr/README.md). |
-| ☐ | Capability tests before enabling tool use | ⬜ |
-| ☐ | Ask / Assist modes, typed tools, scoped reads | ⬜ |
-| ☐ | Structured confirmations, exact proposal binding | ⬜ |
-| ☐ | Permissions, cancellation, bounded loops | ⬜ |
-| ☐ | Idempotency | ✅ — already enforced in the service layer and tested (§22 fixtures 17 and 18) |
-| ☐ | Audit and undo | 🟡 — append-only audit tables exist; no action-level undo |
-| ☐ | App-data customization through the same services as the UI | ⬜ |
+| ☐ | Separate agent endpoint settings, independent of extraction | ✅ — two rows in `ai_endpoints`, two cards in Settings |
+| ☐ | Model dropdown | ✅ — both `/api/tags` and `/v1/models` are probed; see ADR 0005 and ADR 0009 |
+| ☐ | Capability tests before enabling tool use | 🟡 — a model without tool support is detected on first use and reported plainly; there is no up-front test |
+| ☐ | Ask / Assist modes, typed tools, scoped reads | ✅ — `src/agent/tools.ts`; delete proposals separately gated and off by default |
+| ☐ | Structured confirmations, exact proposal binding | ✅ — hash, expiry, target revisions and model identity re-checked at Confirm |
+| ☐ | Permissions, cancellation, bounded loops | ✅ — 8 tool steps, repeat detection, Stop route |
+| ☐ | Idempotency | ✅ — `proposal:<id>` key; a second Confirm returns the first result |
+| ☐ | Audit and undo | 🟡 — agent-caused changes are attributed with the model identity; undo is the ordinary Trash/restore |
+| ☐ | App-data customization through the same services as the UI | 🟡 — transactions and transfers only; no categories, rules or accounts |
 
 **Gate — adversarial messages cannot bypass policy; every mutation is attributable and confirmed;
-changing the agent model leaves extraction unchanged:** ⬜ not met.
+changing the agent model leaves extraction unchanged:** 🟡 **partly met.** `src/agent/agent.test.ts`
+drives a scripted hostile model through false approval, tampered arguments, a swapped model, expiry
+and a runaway loop, and none reaches the ledger. Not yet covered: an injection arriving *inside a
+tool result* (merchant text from an SMS), which is mitigated by clipping and labelling but untested.
 
 ---
 
