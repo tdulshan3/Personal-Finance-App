@@ -16,11 +16,8 @@ const nextConfig: NextConfig = {
   // output, and on the phone it has to be the copy that was compiled against Termux's own clang.
   serverExternalPackages: ["better-sqlite3-multiple-ciphers"],
 
-  experimental: {
-    // Money crosses the server/client boundary as decimal strings (buildspec.md §16), never as
-    // JS numbers, so there is nothing here that needs a custom serializer.
-    typedRoutes: true,
-  },
+  // Catches a typo in an internal href at build time rather than as a 404 on the phone.
+  typedRoutes: true,
 
   async headers() {
     return [
