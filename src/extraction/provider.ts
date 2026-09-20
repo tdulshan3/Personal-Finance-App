@@ -575,14 +575,28 @@ function detectionCandidates(baseUrl: string): readonly Candidate[] {
   const root = base.replace(/\/v1$/, "");
   const origin = url.origin;
 
+  /*
+   * Ollama is probed FIRST, and the order matters more than it looks.
+   *
+   * Ollama serves both its native API and an OpenAI-compatible shim at `/v1`. Probing the shim
+   * first therefore matches on every Ollama host — and the shim has no equivalent of `think: false`.
+   * Measured against the owner's `qwen3.5:2b`: over the shim the model spent its entire 1024-token
+   * budget on hidden reasoning and returned `content` of length 0, with `finish_reason: "length"`.
+   * Extraction silently produced nothing. Over the native API with `think: false` the same model
+   * answered correctly in 3.3 s.
+   *
+   * A host that answers `/api/tags` is Ollama, and its native dialect is strictly better for this
+   * job. llama.cpp does not serve `/api/tags` (verified: HTTP 404), so it still falls through to
+   * the OpenAI-compatible candidates below.
+   */
   const raw: Candidate[] = [
+    { path: joinPath(root, "/api/tags"), kind: ProviderKind.OLLAMA_NATIVE, baseUrl: `${origin}${root}` },
     { path: joinPath(base, "/models"), kind: ProviderKind.OPENAI_COMPATIBLE, baseUrl: `${origin}${base}` },
     {
       path: joinPath(root, "/v1/models"),
       kind: ProviderKind.OPENAI_COMPATIBLE,
       baseUrl: `${origin}${joinPath(root, "/v1")}`,
     },
-    { path: joinPath(root, "/api/tags"), kind: ProviderKind.OLLAMA_NATIVE, baseUrl: `${origin}${root}` },
   ];
 
   const seen = new Set<string>();

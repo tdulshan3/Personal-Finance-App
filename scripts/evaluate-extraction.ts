@@ -15,6 +15,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { parseMajorUnits, requireCurrency } from "../src/core/domain/money.ts";
+import { createProvider, detectProvider } from "../src/extraction/provider.ts";
+import type { InferenceProvider } from "../src/extraction/provider.ts";
 import { buildExtractionMessages } from "../src/extraction/prompt.ts";
 import { EXTRACTION_PROMPT_VERSION } from "../src/extraction/prompt.ts";
 import { EXTRACTION_JSON_SCHEMA, EXTRACTION_SCHEMA_VERSION } from "../src/extraction/schema.ts";
@@ -39,6 +41,27 @@ const REPEAT = Math.max(1, Number(flag("repeat", "1")));
 const MAX_TOKENS = Math.max(128, Number(flag("max-tokens", "512")));
 const AS_JSON = args.includes("--json");
 
+/*
+ * Resolved once, because the two hosts need different request shapes: llama.cpp honours
+ * `chat_template_kwargs`, while Ollama's OpenAI shim silently ignores it and the model spends its
+ * whole budget on hidden reasoning. Only Ollama's native /api/chat accepts `think: false`.
+ */
+let provider: InferenceProvider | undefined;
+async function resolveProvider(): Promise<InferenceProvider> {
+  if (provider) return provider;
+  const detected = await detectProvider(BASE, { allowPlaintextHttp: true, allowPrivateNetwork: true });
+  const resolved = createProvider({
+    kind: detected.kind,
+    baseUrl: detected.baseUrl,
+    allowPlaintextHttp: true,
+    allowPrivateNetwork: true,
+  });
+  console.log(`  provider        ${detected.kind} at ${detected.baseUrl}` +
+    (detected.serverHeader ? ` (Server: ${detected.serverHeader})` : ""));
+  provider = resolved;
+  return resolved;
+}
+
 const FIXTURE_DIR = fileURLToPath(new URL("../fixtures/messages", import.meta.url));
 
 function loadFixtures(): Fixture[] {
@@ -54,29 +77,24 @@ async function extract(fixture: Fixture): Promise<{ payload: unknown; ms: number
   const messages = buildExtractionMessages(sourceId, fixture.source_text);
   const started = Date.now();
   try {
-    const response = await fetch(`${BASE.replace(/\/+$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      redirect: "error",
-      body: JSON.stringify({
-        model: MODEL,
-        stream: false,
-        temperature: 0,
-        max_tokens: MAX_TOKENS,
-        // Verified switch for this host; without it the model spends its whole budget thinking.
-        chat_template_kwargs: { enable_thinking: false },
-        response_format: {
-          type: "json_schema",
-          json_schema: { name: "extraction", schema: EXTRACTION_JSON_SCHEMA, strict: true },
-        },
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
-      }),
+    const active = await resolveProvider();
+    const result = await active.chatJson({
+      model: MODEL,
+      messages,
+      schema: EXTRACTION_JSON_SCHEMA,
+      schemaName: "extraction",
+      temperature: 0,
+      maxOutputTokens: MAX_TOKENS,
+      disableThinking: true,
+      timeoutMs: 180_000,
     });
-    const body = (await response.json()) as {
-      choices?: { message?: { content?: string } }[];
+    return {
+      payload: result.json,
+      ms: Date.now() - started,
+      ...(result.jsonParseError
+        ? { error: `${result.jsonParseError}${result.truncated ? " (truncated)" : ""}` }
+        : {}),
     };
-    const content = body.choices?.[0]?.message?.content ?? "";
-    return { payload: JSON.parse(content), ms: Date.now() - started };
   } catch (error) {
     return {
       payload: null,

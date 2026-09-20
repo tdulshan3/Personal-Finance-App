@@ -71,6 +71,16 @@ export function requireService(): FinanceService {
   return state.service;
 }
 
+/**
+ * The open database handle, for services that are built per-request rather than held on the
+ * runtime. There is exactly one connection for the process, so nothing here opens a second.
+ */
+export function requireDb(): Db {
+  const state = current();
+  if (state.status !== "unlocked") throw lockedError();
+  return state.db;
+}
+
 export function currentVault(): VaultMetadata | undefined {
   const state = current();
   return state.status === "unlocked" ? state.vault : undefined;

@@ -22,6 +22,49 @@ signal, not a release gate.** §22 sets a provisional target of 99.5% precision 
 events on a representative held-out set; this corpus is nowhere near large enough to support that
 claim, and nothing auto-posts today.
 
+## Model comparison
+
+Same prompt (`qwen-extract-v3`), same 14 fixtures, same 1024-token budget.
+
+| | llama.cpp `qwen3.5-0.8b` | Ollama `qwen3.5:2b` |
+|---|---|---|
+| Dialect | OpenAI-compatible | **Ollama native** |
+| Schema valid | 14/14 | 14/14 |
+| `event_type` | 11/14 (79%) | **13/14 (93%)** |
+| Amount parses | 10/11 (91%) | 10/11 (91%) |
+| Currency | 12/12 | 12/12 |
+| `occurred_at_text` | 11/11 | 10/11 |
+| `account_suffix` | 7/10 (70%) | 5/10 (50%) |
+| **p50 latency** | 23,600 ms | **2,418 ms** |
+| p95 latency | 56,985 ms | 13,480 ms |
+| Digest reported | no | **yes** |
+
+The 2B model is roughly **ten times faster and more accurate**, and it gets
+`sms_scheduled_standing_order` right — the "will be debited" case that §7.1 singles out, and the one
+misclassification that would book money which has not moved. It is weaker on `account_suffix`
+(5/10 vs 7/10), which matters for account resolution and is worth watching.
+
+It also reports a model digest, which closes the §7.2 provenance gap that llama.cpp leaves open.
+
+### Ollama must use its native API, not its OpenAI shim
+
+Ollama serves both. On the `/v1` shim there is no equivalent of `think: false`, and these models
+think by default: `qwen3.5:2b` spent its entire 1024-token budget on hidden reasoning and returned
+`content` of length **0**, with `finish_reason: "length"`. Extraction silently produced nothing.
+
+Provider detection originally probed the OpenAI paths first, so **every Ollama host was misdetected
+into the broken dialect**. `detectionCandidates` now probes `/api/tags` first; llama.cpp does not
+serve it (verified HTTP 404) and still resolves correctly.
+
+| Request | `content` | `thinking` | Result |
+|---|---|---|---|
+| `/v1` + `chat_template_kwargs` | 0 chars | 3,551 chars | silently empty |
+| `/api/chat` + `think: false` | 595 chars | 0 | correct, 3.3 s |
+
+The 34.7B MoE (`qwen36-uncensored`) also answered correctly but took 88.8 s on a cold call at
+28 t/s, against 3.3 s at 86 t/s for the 2B. For short extraction prompts the small model wins
+decisively.
+
 ## Prompt versions
 
 | Version | Instruction | Output budget | Schema valid | `event_type` | Amount parses |
