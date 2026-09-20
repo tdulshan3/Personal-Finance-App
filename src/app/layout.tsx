@@ -1,7 +1,10 @@
 import type { Metadata, Viewport } from "next";
 
-import { BottomNav } from "../ui/navigation.tsx";
+import { currentProcessor } from "../server/background.ts";
 import { accessState } from "../server/session.ts";
+import { LiveStatus, LiveSync } from "../ui/live-sync.tsx";
+import { AppNav } from "../ui/navigation.tsx";
+import { LockButton } from "./lock-button.tsx";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -27,13 +30,30 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const access = await accessState();
+  const ready = access.kind === "ready";
+  // Re-read on every live refresh, so the sidebar's badge follows the inbox without a reload.
+  const reviewCount = ready ? (currentProcessor()?.counts().openReviews ?? 0) : 0;
 
   return (
     <html lang="en">
-      <body>
+      {/* `has-nav` is what makes room for the desktop sidebar; the pre-unlock screens have none. */}
+      <body className={ready ? "has-nav" : undefined}>
         {children}
         {/* Navigation only appears once the vault is open; there is nothing to navigate to before. */}
-        {access.kind === "ready" ? <BottomNav /> : null}
+        {ready ? (
+          <>
+            <AppNav
+              reviewCount={reviewCount}
+              footer={
+                <>
+                  <LiveStatus />
+                  <LockButton />
+                </>
+              }
+            />
+            <LiveSync />
+          </>
+        ) : null}
       </body>
     </html>
   );
