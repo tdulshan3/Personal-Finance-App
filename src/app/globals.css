@@ -1567,10 +1567,33 @@ input[type="datetime-local"].control {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  /* Keeps a short column (a form, a summary) in view while the long one beside it scrolls. */
+  /* `flip`: the first stack in the DOM is drawn second, and the track widths swap to match. */
+  .columns-flip > .stack:first-child {
+    order: 1;
+  }
+
+  .columns-aside-main.columns-flip {
+    grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
+  }
+
+  .columns-main-aside.columns-flip {
+    grid-template-columns: minmax(320px, 1fr) minmax(0, 1.7fr);
+  }
+
+  /*
+   * Keeps a column (a form, a summary) in view while the long one beside it scrolls. A pinned
+   * column taller than the window could never be scrolled to its own end, so it scrolls within
+   * itself instead; the negative margin and matching padding keep card shadows from being clipped.
+   */
   .stack-sticky {
     position: sticky;
     top: 32px;
+    max-height: calc(100dvh - 64px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    margin: -8px;
+    padding: 8px;
   }
 
   .wide-only {
