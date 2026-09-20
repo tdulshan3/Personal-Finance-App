@@ -95,6 +95,18 @@
   --glass-rim: rgb(0 0 0 / 7%);
   --tabbar-bg: rgb(255 255 255 / 80%);
   --bg-scrim: rgb(242 242 247 / 88%);
+
+  /* Charts. Graphics need 3:1 against the card, not text's 4.5:1; each of these clears it. */
+  --chart-income: #1f8a3d;
+  --chart-spending: #0071e3;
+  --chart-1: #0071e3;
+  --chart-2: #d9480f;
+  --chart-3: #1f8a3d;
+  --chart-4: #8a3ffc;
+  --chart-5: #c2255c;
+  --chart-6: #0b7285;
+  --chart-7: #a26a00;
+  --chart-8: #6b7280;
   /* Soft light inside the Home summary card. Capped so text on it stays above 4.5:1 (see above). */
   --glow-a: rgb(0 113 227 / 12%);
   --glow-b: rgb(88 86 214 / 10%);
@@ -196,6 +208,17 @@
     --glass-rim: rgb(0 0 0 / 40%);
     --tabbar-bg: rgb(30 30 32 / 78%);
     --bg-scrim: rgb(0 0 0 / 85%);
+
+    --chart-income: #30d158;
+    --chart-spending: #0a84ff;
+    --chart-1: #0a84ff;
+    --chart-2: #ff9f0a;
+    --chart-3: #30d158;
+    --chart-4: #bf5af2;
+    --chart-5: #ff6482;
+    --chart-6: #40c8e0;
+    --chart-7: #ffd60a;
+    --chart-8: #98989d;
     --glow-a: rgb(10 132 255 / 22%);
     --glow-b: rgb(94 92 230 / 18%);
     --glow-c: rgb(100 210 255 / 12%);
@@ -240,6 +263,17 @@
   --glass-rim: rgb(0 0 0 / 40%);
   --tabbar-bg: rgb(30 30 32 / 78%);
   --bg-scrim: rgb(0 0 0 / 85%);
+
+  --chart-income: #30d158;
+  --chart-spending: #0a84ff;
+  --chart-1: #0a84ff;
+  --chart-2: #ff9f0a;
+  --chart-3: #30d158;
+  --chart-4: #bf5af2;
+  --chart-5: #ff6482;
+  --chart-6: #40c8e0;
+  --chart-7: #ffd60a;
+  --chart-8: #98989d;
   --glow-a: rgb(10 132 255 / 22%);
   --glow-b: rgb(94 92 230 / 18%);
   --glow-c: rgb(100 210 255 / 12%);

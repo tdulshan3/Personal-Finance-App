@@ -1,0 +1,221 @@
+/* Home dashboard. Layout only; every colour is a token. */
+
+/* Period switch: an iOS segmented control made of links, so the choice lives in the URL. */
+.segments {
+  display: inline-flex;
+  /* A grid item stretches by default; the control should hug its options. */
+  justify-self: start;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--surface-sunken);
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.segments::-webkit-scrollbar {
+  display: none;
+}
+
+.segment {
+  flex: none;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--font-footnote);
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.segment:hover {
+  text-decoration: none;
+}
+
+.segment[aria-current="true"] {
+  background: var(--surface-raised);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 14%);
+}
+
+/* Headline figures: two by two on a phone, four across when there is room. */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.kpi {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  padding: var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.kpiLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-footnote);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.kpiValue {
+  font-size: clamp(1.05rem, 4.6vw, 1.5rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.kpiCode {
+  font-size: 0.7em;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-right: 4px;
+}
+
+.kpiDelta {
+  font-size: var(--font-footnote);
+  color: var(--text-secondary);
+}
+
+.good {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.bad {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* Category breakdown: ring beside its legend when wide, above it when narrow. */
+.breakdown {
+  display: grid;
+  gap: var(--space-5);
+  align-items: center;
+}
+
+.legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.legendRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px var(--space-2);
+  align-items: center;
+}
+
+.legendName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legendAmount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.legendShare {
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-left: 6px;
+}
+
+/* The bar repeats the share as a length, so the list reads at a glance without the ring. */
+.track {
+  grid-column: 1 / -1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  min-width: 3px;
+}
+
+.centreLabel {
+  font-size: var(--font-footnote);
+  color: var(--text-secondary);
+}
+
+.centreValue {
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.chartKey {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+  font-size: var(--font-footnote);
+  color: var(--text-secondary);
+}
+
+.chartKey span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dash {
+  width: 16px;
+  border-top: 2px dashed var(--text-secondary);
+}
+
+.insight {
+  margin: var(--space-3) 0 0;
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+}
+
+@media (min-width: 560px) {
+  .breakdown {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .kpis {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+
+  .kpi {
+    padding: 20px;
+  }
+
+  .kpiValue {
+    font-size: 1.5rem;
+  }
+}
