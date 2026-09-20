@@ -5,7 +5,7 @@ import { TransactionStatus } from "../../core/domain/transaction.ts";
 import { requireService } from "../../server/runtime.ts";
 import { accessState } from "../../server/session.ts";
 import { labelForKind, labelForPrecision } from "../../ui/labels.ts";
-import { Amount, Badge, Card, EmptyState, PageHeader, Shell } from "../../ui/primitives.tsx";
+import { Amount, Badge, ButtonLink, Card, EmptyState, PageHeader, Shell } from "../../ui/primitives.tsx";
 import { DeleteTransactionButton, RestoreTransactionButton } from "./row-actions.tsx";
 
 export const dynamic = "force-dynamic";
@@ -62,22 +62,7 @@ export default async function TransactionsPage({
             : `${rows.length} shown`
         }
         action={
-          <Link
-            href="/transactions/new"
-            style={{
-              minHeight: "var(--touch-target)",
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "0 var(--space-5)",
-              borderRadius: "var(--radius-pill)",
-              background: "var(--primary)",
-              color: "var(--primary-contrast)",
-              fontWeight: 600,
-              textDecoration: "none",
-            }}
-          >
-            Add
-          </Link>
+          <ButtonLink href="/transactions/new">Add</ButtonLink>
         }
       />
 
@@ -182,9 +167,9 @@ export default async function TransactionsPage({
                   }}
                 >
                   <div style={{ display: "grid", gap: "var(--space-1)", minWidth: 0 }}>
-                    <span style={{ fontWeight: 560 }}>
+                    <Link href={`/transactions/${row.id}`} style={{ fontWeight: 560 }}>
                       {row.merchantName ?? labelForKind(row.kind)}
-                    </span>
+                    </Link>
                     <span
                       style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}
                     >

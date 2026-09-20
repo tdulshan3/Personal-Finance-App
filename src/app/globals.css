@@ -1,42 +1,104 @@
 /*
- * Design tokens and base styles.
+ * Design tokens, base styles and component classes.
  *
  * buildspec.md §13: "Create a calm, rounded, blue, iOS-inspired interface with clear financial
  * information. Use translucent glass and blur sparingly for navigation, sheets, and a few summary
  * surfaces. Keep transaction tables and forms readable on mostly solid surfaces."
  *
- * The palette is the suggested token table from §13, adjusted only where contrast required it.
- * No Tailwind: plain CSS custom properties keep the phone-hosted bundle small and give exact
- * control over the specified values.
+ * The look follows the current iOS design language: a grouped grey background, white inset cards
+ * with large continuous corners, capsule buttons, filled inputs, hairline separators, and a floating
+ * glass tab bar. Glass is limited to the tab bar and the Home summary card; everything that holds a
+ * table or a form is solid.
+ *
+ * No Tailwind, no web fonts, no images: plain CSS custom properties keep the phone-hosted bundle
+ * small. The font stack is the platform's own UI face — San Francisco on Apple devices, Roboto on
+ * Android — so nothing is downloaded and nothing proprietary is shipped.
+ *
+ * ── Contrast ────────────────────────────────────────────────────────────────────────────────────
+ * Measured with a WCAG 2.x relative-luminance script. Every colour used for text is >= 4.5:1 on
+ * every surface it can land on. "fill" is --surface-sunken composited over the surface beneath it.
+ *
+ * iOS's own system colours do NOT pass as text (systemBlue #007AFF is 4.02:1 on white, the
+ * "accessible" green #248A3D is 4.40:1, the 60 %-alpha secondary label is 3.44:1), so each hue was
+ * darkened (light) or lightened (dark) along its own HSL lightness until the worst pair passed.
+ *
+ *   LIGHT                          card    page    fill    own tint   glass card (worst)
+ *   --text            #000000     21.00   18.82     —         —        17.31
+ *   --text-secondary  #636366      5.99    5.37    5.19       —         4.94   (fill on page 4.69,
+ *                                                                               fill on fill 4.55)
+ *   --primary         #0064D2      5.59    5.01    4.85      4.68       4.61
+ *   --success         #1F7735      5.60    5.02    4.86      4.75       4.62
+ *   --danger          #CC0014      5.87    5.26    5.09      4.70       4.84
+ *   --warning         #C03200      5.68    5.09    4.92      4.69       4.68
+ *   white on --primary-fill #0071E3   4.70        white on --primary   5.59
+ *
+ *   DARK                           card    page   raised   fill    own tint   glass card (worst)
+ *   --text            #FFFFFF     17.01   21.00     —        —        —        13.04
+ *   --text-secondary  #AEAEB2      7.69    9.50    6.30     5.81      —         5.90  (fill on fill 4.52)
+ *   --primary         #47A0FF      6.27    7.74    5.14     4.73     4.67       4.81
+ *   --success         #30D158      8.42   10.39    6.89     6.35     5.90       6.45
+ *   --danger          #FF6F66      6.25    7.72    5.12     4.72     4.72       4.79
+ *   --warning         #FF9F0A      8.28   10.22    6.78     6.25     5.81       6.34
+ *   white on --primary-fill #0071E3   4.70        --primary-contrast #00142E on --primary   6.79
+ *
+ * Two consequences worth knowing before changing a colour:
+ *
+ *  1. The soft tints (--primary-soft, --danger-soft, …) are OPAQUE. They are exactly the accent at
+ *     12 % (light) / 18 % (dark) composited over the card colour. A translucent tint shifts when it
+ *     is stacked on the grey page or on a fill, and the accent text on top of it then drops below
+ *     4.5:1 — measured with these same accents: 4.23 for a chip on the light page, 4.10 for a badge
+ *     on a light fill, 3.58 for a badge on a dark fill. Opaque tints make "accent on its own tint"
+ *     one fixed, measured pair.
+ *
+ *  2. In dark mode no single blue can be both readable text on a #1C1C1E card (needs luminance
+ *     >= 0.23) and a background for white text (needs <= 0.18). So there are two tokens:
+ *     --primary is the accent for TEXT and ICONS, --primary-fill is the accent for FILLED surfaces
+ *     and always carries --on-primary-fill (white). --primary-contrast stays what it always was:
+ *     the colour that is readable on top of --primary itself.
  */
 
 :root {
   color-scheme: light;
 
-  /* §13 token table — light */
-  --bg: #f3f6fc;
+  /* iOS grouped background, cards, fills, labels, separator — light */
+  --bg: #f2f2f7;
   --surface: #ffffff;
-  --primary: #1663d6;
-  --text: #142238;
-  --text-secondary: #52627a;
-  --border: #dce5f2;
-
-  /* Derived roles */
   --surface-raised: #ffffff;
-  --surface-sunken: #eaf0fa;
-  --primary-contrast: #ffffff;
-  --primary-soft: #e4edfd;
-  --danger: #b3261e;
-  --danger-soft: #fdeceb;
-  --success: #126b45;
-  --success-soft: #e3f4ec;
-  --warning: #8a5300;
-  --warning-soft: #fdf0dc;
-  --overlay: rgb(20 34 56 / 40%);
+  --surface-sunken: rgb(118 118 128 / 12%);
+  --text: #000000;
+  --text-secondary: #636366;
+  /* Decorative marks only (disclosure chevrons). Far too faint for text. */
+  --text-tertiary: rgb(60 60 67 / 30%);
+  --border: #c6c6c8;
 
-  /* Glass surfaces. §13: blur is clipped to small surfaces and always has a solid fallback. */
+  /* Accent */
+  --primary: #0064d2;
+  --primary-fill: #0071e3;
+  --on-primary-fill: #ffffff;
+  --primary-contrast: #ffffff;
+  --primary-soft: #e0ecfa;
+  --focus-ring: #0064d2;
+
+  /* Status */
+  --danger: #cc0014;
+  --danger-soft: #f9e0e3;
+  --success: #1f7735;
+  --success-soft: #e4efe7;
+  --warning: #c03200;
+  --warning-soft: #f7e6e0;
+  --overlay: rgb(0 0 0 / 40%);
+
+  /* Glass. §13: blur is clipped to small surfaces and always has a solid fallback. */
   --glass-bg: rgb(255 255 255 / 72%);
-  --glass-border: rgb(220 229 242 / 90%);
+  --glass-border: rgb(255 255 255 / 65%);
+  --glass-highlight: rgb(255 255 255 / 90%);
+  --glass-rim: rgb(0 0 0 / 7%);
+  --tabbar-bg: rgb(255 255 255 / 80%);
+  --bg-scrim: rgb(242 242 247 / 88%);
+  /* Soft light inside the Home summary card. Capped so text on it stays above 4.5:1 (see above). */
+  --glow-a: rgb(0 113 227 / 12%);
+  --glow-b: rgb(88 86 214 / 10%);
+  --glow-c: rgb(50 173 230 / 10%);
 
   /* §13: "an 8 dp spacing rhythm with 4 dp for small adjustments" */
   --space-1: 4px;
@@ -47,90 +109,164 @@
   --space-6: 32px;
   --space-7: 48px;
 
-  /* §13: "20–24 dp card corners, 12–16 dp input corners" */
-  --radius-card: 22px;
+  /* Continuous-corner cards, smaller radii for whatever sits inside them, capsules for controls. */
+  --radius-card: 26px;
   --radius-input: 14px;
+  --radius-inner: 10px;
   --radius-pill: 999px;
 
-  /* §13: "a clear type hierarchy around 13/16/20/30 sp" */
+  /*
+   * iOS text styles. rem rather than px so the browser's own text-size setting still scales the
+   * interface, the way Dynamic Type would.
+   *   Large Title 34/41 · Title 2 22/28 · Title 3 20/25 · Headline 17 semibold · Body 17/22 ·
+   *   Subheadline 15/20 · Footnote 13/18 · Caption 12/16
+   */
   --font-xs: 0.75rem;
-  --font-sm: 0.8125rem;
-  --font-base: 1rem;
-  --font-lg: 1.25rem;
-  --font-xl: 1.875rem;
+  --font-footnote: 0.8125rem;
+  --font-sm: 0.9375rem;
+  --font-base: 1.0625rem;
+  --font-title3: 1.25rem;
+  --font-lg: 1.375rem;
+  --font-xl: 2.125rem;
 
-  --shadow-card: 0 1px 2px rgb(20 34 56 / 4%), 0 8px 24px rgb(20 34 56 / 6%);
-  --shadow-sheet: 0 -2px 24px rgb(20 34 56 / 12%);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 4%);
+  --shadow-float: 0 12px 32px rgb(0 0 0 / 14%), 0 2px 8px rgb(0 0 0 / 6%);
+  --shadow-sheet: 0 -2px 24px rgb(0 0 0 / 12%);
 
   /* §13: "48 dp minimum touch targets" */
   --touch-target: 48px;
+  --control-height: 50px;
+  --hairline: 1px;
+
+  /* Large Title. Eases down on a 360 px phone so a greeting and a trailing button share one line. */
+  --large-title-size: clamp(1.75rem, 8.6vw, var(--font-xl));
+
+  /* The floating tab bar: its height, and how far it sits above the bottom edge. */
+  --tabbar-height: 66px;
+  --tabbar-offset: max(12px, calc(env(safe-area-inset-bottom, 0px) - 8px));
+  /*
+   * For anything that sticks to the bottom of the screen (the Assistant's composer): how far up it
+   * must sit to clear the bar with 8 px of air, NOT counting the home-indicator inset. Callers add
+   * `env(safe-area-inset-bottom)` themselves, so that term is subtracted here and the sum comes out
+   * at exactly the top of the bar plus 8 px on every device.
+   */
+  --tabbar-clearance: calc(
+    var(--tabbar-height) + var(--tabbar-offset) + 8px - env(safe-area-inset-bottom, 0px)
+  );
 
   --font-sans:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  accent-color: var(--primary-fill);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
 
-    /* §13 token table — dark */
-    --bg: #0b1220;
-    --surface: #152033;
-    --primary: #80b4ff;
-    --text: #f1f5fc;
-    --text-secondary: #adbed6;
-    --border: #2d3d55;
+    --bg: #000000;
+    --surface: #1c1c1e;
+    --surface-raised: #2c2c2e;
+    --surface-sunken: rgb(118 118 128 / 24%);
+    --text: #ffffff;
+    --text-secondary: #aeaeb2;
+    --text-tertiary: rgb(235 235 245 / 30%);
+    --border: #38383a;
 
-    --surface-raised: #1b2840;
-    --surface-sunken: #0f1829;
-    --primary-contrast: #06152c;
-    --primary-soft: #1d3255;
-    --danger: #ffb4ab;
-    --danger-soft: #3b1a17;
-    --success: #7fd6ab;
-    --success-soft: #11301f;
-    --warning: #f2c07a;
-    --warning-soft: #33250f;
+    --primary: #47a0ff;
+    --primary-fill: #0071e3;
+    --on-primary-fill: #ffffff;
+    --primary-contrast: #00142e;
+    --primary-soft: #243447;
+    --focus-ring: #47a0ff;
+
+    --danger: #ff6f66;
+    --danger-soft: #452b2b;
+    --success: #30d158;
+    --success-soft: #203d28;
+    --warning: #ff9f0a;
+    --warning-soft: #45341a;
     --overlay: rgb(0 0 0 / 56%);
 
-    --glass-bg: rgb(21 32 51 / 76%);
-    --glass-border: rgb(45 61 85 / 90%);
+    --glass-bg: rgb(44 44 46 / 62%);
+    --glass-border: rgb(255 255 255 / 10%);
+    --glass-highlight: rgb(255 255 255 / 16%);
+    --glass-rim: rgb(0 0 0 / 40%);
+    --tabbar-bg: rgb(30 30 32 / 78%);
+    --bg-scrim: rgb(0 0 0 / 85%);
+    --glow-a: rgb(10 132 255 / 22%);
+    --glow-b: rgb(94 92 230 / 18%);
+    --glow-c: rgb(100 210 255 / 12%);
 
-    --shadow-card: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 28%);
+    --shadow-card: none;
+    --shadow-float: 0 12px 32px rgb(0 0 0 / 60%), 0 2px 8px rgb(0 0 0 / 40%);
     --shadow-sheet: 0 -2px 24px rgb(0 0 0 / 45%);
   }
 }
 
+/* The owner's explicit choice beats the system setting in both directions. */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0b1220;
-  --surface: #152033;
-  --primary: #80b4ff;
-  --text: #f1f5fc;
-  --text-secondary: #adbed6;
-  --border: #2d3d55;
-  --surface-raised: #1b2840;
-  --surface-sunken: #0f1829;
-  --primary-contrast: #06152c;
-  --primary-soft: #1d3255;
-  --danger: #ffb4ab;
-  --danger-soft: #3b1a17;
-  --success: #7fd6ab;
-  --success-soft: #11301f;
-  --warning: #f2c07a;
-  --warning-soft: #33250f;
+
+  --bg: #000000;
+  --surface: #1c1c1e;
+  --surface-raised: #2c2c2e;
+  --surface-sunken: rgb(118 118 128 / 24%);
+  --text: #ffffff;
+  --text-secondary: #aeaeb2;
+  --text-tertiary: rgb(235 235 245 / 30%);
+  --border: #38383a;
+
+  --primary: #47a0ff;
+  --primary-fill: #0071e3;
+  --on-primary-fill: #ffffff;
+  --primary-contrast: #00142e;
+  --primary-soft: #243447;
+  --focus-ring: #47a0ff;
+
+  --danger: #ff6f66;
+  --danger-soft: #452b2b;
+  --success: #30d158;
+  --success-soft: #203d28;
+  --warning: #ff9f0a;
+  --warning-soft: #45341a;
   --overlay: rgb(0 0 0 / 56%);
-  --glass-bg: rgb(21 32 51 / 76%);
-  --glass-border: rgb(45 61 85 / 90%);
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 28%);
+
+  --glass-bg: rgb(44 44 46 / 62%);
+  --glass-border: rgb(255 255 255 / 10%);
+  --glass-highlight: rgb(255 255 255 / 16%);
+  --glass-rim: rgb(0 0 0 / 40%);
+  --tabbar-bg: rgb(30 30 32 / 78%);
+  --bg-scrim: rgb(0 0 0 / 85%);
+  --glow-a: rgb(10 132 255 / 22%);
+  --glow-b: rgb(94 92 230 / 18%);
+  --glow-c: rgb(100 210 255 / 12%);
+
+  --shadow-card: none;
+  --shadow-float: 0 12px 32px rgb(0 0 0 / 60%), 0 2px 8px rgb(0 0 0 / 40%);
   --shadow-sheet: 0 -2px 24px rgb(0 0 0 / 45%);
 }
+
+/* A true hairline where the screen can draw one; a whole pixel where it cannot. */
+@media (min-resolution: 2dppx) {
+  :root {
+    --hairline: 0.5px;
+  }
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────────────────────────── */
 
 *,
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 html,
@@ -140,48 +276,151 @@ body {
 }
 
 body {
+  min-height: 100dvh;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
   font-size: var(--font-base);
-  line-height: 1.5;
+  line-height: 1.35;
   -webkit-font-smoothing: antialiased;
-  /* Room for the fixed bottom navigation plus the home indicator. */
-  padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+  /* Clears the floating tab bar, its offset from the edge, and leaves a little air above it. */
+  padding-bottom: calc(var(--tabbar-height) + var(--tabbar-offset) + var(--space-5));
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+
+/* Large Title */
+h1 {
+  font-size: var(--large-title-size);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.022em;
+}
+
+/* Title 2 */
+h2 {
+  font-size: var(--font-lg);
+  font-weight: 700;
+  line-height: 1.27;
+  letter-spacing: -0.018em;
+}
+
+/* Headline */
+h3 {
+  font-size: var(--font-base);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+@media (hover: hover) {
+  a:hover {
+    text-decoration: underline;
+  }
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+code,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+/* A bare <code> in running text gets a quiet fill; anything styled inline keeps its own. */
+:where(p, li, span, dd) > :where(code) {
+  background: var(--surface-sunken);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
+summary {
+  cursor: pointer;
 }
 
 /*
- * §13: "Never blur readable text or put every list row behind an expensive live blur." Blur is
- * opt-in per surface and disabled entirely when the owner asks for reduced transparency.
+ * Plain form elements a page writes by hand pick up the same filled look as the components in
+ * src/ui/form.tsx. `:where()` keeps this at zero specificity, so any class or inline style wins.
  */
-.glass {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+:where(
+    input:not(
+        [type="checkbox"],
+        [type="radio"],
+        [type="range"],
+        [type="file"],
+        [type="color"],
+        [type="hidden"],
+        [type="submit"],
+        [type="button"],
+        [type="reset"],
+        [type="image"]
+      ),
+    select,
+    textarea
+  ) {
+  min-height: var(--control-height);
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-input);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font-size: var(--font-base);
 }
 
-@supports not (backdrop-filter: blur(1px)) {
-  .glass {
-    background: var(--surface);
-  }
+:where(textarea) {
+  padding-block: var(--space-3);
+  min-height: 112px;
+  line-height: 1.35;
+  resize: vertical;
 }
 
-:root[data-reduce-transparency="true"] .glass {
-  background: var(--surface);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+::placeholder {
+  /* iOS's own placeholder grey is ~2:1. This one is the secondary label, which passes. */
+  color: var(--text-secondary);
+  opacity: 1;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
-  }
+/* A single visible focus treatment everywhere, for keyboard and switch access (§13). */
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+:where(a:not([class])):focus-visible {
+  border-radius: 6px;
+}
+
+:where(button, a, input, select, textarea):focus:not(:focus-visible) {
+  outline: none;
 }
 
 /*
@@ -194,61 +433,6 @@ body {
   white-space: nowrap;
 }
 
-h1,
-h2,
-h3 {
-  margin: 0;
-  line-height: 1.25;
-  letter-spacing: -0.01em;
-}
-
-h1 {
-  font-size: var(--font-xl);
-  font-weight: 700;
-}
-
-h2 {
-  font-size: var(--font-lg);
-  font-weight: 650;
-}
-
-h3 {
-  font-size: var(--font-base);
-  font-weight: 620;
-}
-
-p {
-  margin: 0;
-}
-
-a {
-  color: var(--primary);
-  text-decoration: none;
-}
-
-a:hover {
-  text-decoration: underline;
-}
-
-button,
-input,
-select,
-textarea {
-  font: inherit;
-  color: inherit;
-}
-
-/* A single visible focus treatment everywhere, for keyboard and switch access (§13). */
-:focus-visible {
-  outline: 3px solid var(--primary);
-  outline-offset: 2px;
-  border-radius: 6px;
-}
-
-:where(button, a, input, select, textarea):focus:not(:focus-visible) {
-  outline: none;
-}
-
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -259,4 +443,897 @@ textarea {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/* Small text helpers for pages: Footnote and Caption in the secondary label colour. */
+.footnote {
+  font-size: var(--font-footnote);
+  line-height: 1.38;
+  color: var(--text-secondary);
+}
+
+.caption {
+  font-size: var(--font-xs);
+  line-height: 1.33;
+  color: var(--text-secondary);
+}
+
+/* ── Page frame ──────────────────────────────────────────────────────────────────────────────── */
+
+.shell {
+  --shell-padding: var(--space-4);
+  max-width: 680px;
+  margin: 0 auto;
+  padding: calc(var(--space-5) + env(safe-area-inset-top, 0px))
+    max(var(--shell-padding), env(safe-area-inset-right, 0px)) var(--space-6)
+    max(var(--shell-padding), env(safe-area-inset-left, 0px));
+  display: grid;
+  /* One column that may shrink: without minmax(0, …) a long unbroken string widens the page. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 28px;
+}
+
+@media (min-width: 430px) {
+  .shell {
+    --shell-padding: 20px;
+  }
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-inline: 4px;
+  margin-top: var(--space-2);
+}
+
+.page-header-text {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.page-subtitle {
+  font-size: var(--font-footnote);
+  line-height: 1.38;
+  color: var(--text-secondary);
+}
+
+/* As tall as the title's first line, so a badge or a link centres on it rather than on the block. */
+.page-header-action {
+  flex: 0 0 auto;
+  min-height: calc(var(--large-title-size) * 1.2);
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ── Cards: an iOS inset-grouped section ─────────────────────────────────────────────────────── */
+
+.card-section {
+  --card-padding: var(--space-4);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+}
+
+@media (min-width: 390px) {
+  .card-section {
+    --card-padding: 20px;
+  }
+}
+
+/* The title sits above the card, not in it, the way a grouped list names its sections. */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 28px;
+  padding-inline: 6px;
+}
+
+.section-title {
+  font-size: var(--font-title3);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
+
+.section-action {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.section-footer {
+  padding-inline: var(--card-padding);
+  font-size: var(--font-footnote);
+  line-height: 1.38;
+  color: var(--text-secondary);
+}
+
+.card {
+  min-width: 0;
+  background: var(--surface);
+  border-radius: var(--radius-card);
+  padding: var(--card-padding);
+  box-shadow: var(--shadow-card);
+}
+
+/*
+ * A hand-written list that ends a card keeps a separator under its last row, which iOS never
+ * draws. Scoped to exactly that case so it cannot reach into a page's own layout.
+ */
+.card > ul:last-child > li:last-child {
+  border-bottom: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+/*
+ * Glass.
+ *
+ * §13: "Never blur readable text or put every list row behind an expensive live blur." Blur is
+ * opt-in per surface, and switched off entirely when the owner asks for reduced transparency —
+ * see the fallbacks at the end of this file.
+ */
+.glass {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+}
+
+/* The Home summary card: translucent, softly lit from inside, with a specular top edge. */
+.card-glass {
+  padding: calc(var(--card-padding) + 4px);
+  background:
+    radial-gradient(130% 120% at 0% 0%, var(--glow-a), transparent 58%),
+    radial-gradient(120% 130% at 100% 100%, var(--glow-b), transparent 60%),
+    radial-gradient(90% 90% at 100% 0%, var(--glow-c), transparent 55%),
+    var(--glass-bg);
+  box-shadow:
+    inset 0 1px 0 0 var(--glass-highlight),
+    0 0 0 var(--hairline) var(--glass-rim),
+    0 10px 30px rgb(0 0 0 / 6%);
+}
+
+/* ── Lists: rows with hairlines inset from the leading edge ──────────────────────────────────── */
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Rows bring their own vertical padding, so a list that fills a card pulls up to its edges. */
+.card > .list:first-child {
+  margin-top: calc(6px - var(--card-padding, 0px));
+}
+
+.card > .list:last-child {
+  margin-bottom: calc(6px - var(--card-padding, 0px));
+}
+
+.list-row {
+  --list-inset: 0px;
+  position: relative;
+  display: block;
+}
+
+.list-row.has-leading {
+  --list-inset: 42px;
+}
+
+/* The separator starts under the text, not under the icon, and runs out to the card's edge. */
+.list-row:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  inset-inline-start: var(--list-inset);
+  inset-inline-end: calc(-1 * var(--card-padding, 0px));
+  border-bottom: var(--hairline) solid var(--border);
+  pointer-events: none;
+}
+
+.list-row-content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--touch-target);
+  padding-block: 11px;
+  color: inherit;
+  text-decoration: none;
+}
+
+a.list-row-content {
+  margin-inline: min(0px, calc(6px - var(--card-padding, 0px)));
+  padding-inline: max(0px, calc(var(--card-padding, 0px) - 6px));
+  border-radius: var(--radius-input);
+  transition: background-color 0.15s ease;
+}
+
+a.list-row-content:hover {
+  text-decoration: none;
+}
+
+a.list-row-content:active {
+  background: var(--surface-sunken);
+}
+
+a.list-row-content:focus-visible {
+  outline-offset: -3px;
+}
+
+.list-row-leading {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.list-row-leading[data-tone="success"] {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.list-row-leading[data-tone="warning"] {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.list-row-leading[data-tone="danger"] {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.list-row-leading[data-tone="neutral"] {
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+}
+
+.list-row-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.list-row-subtitle {
+  font-size: var(--font-footnote);
+  line-height: 1.38;
+  color: var(--text-secondary);
+}
+
+.list-row-trailing {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.list-row-chevron {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  margin-right: -4px;
+}
+
+/* ── Amounts, stats, badges, notes, empty state ──────────────────────────────────────────────── */
+
+.amount {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Colour is a second cue only: the minus sign and the screen-reader label carry the meaning. */
+.amount-negative {
+  color: var(--danger);
+}
+
+.amount-muted {
+  color: var(--text-secondary);
+}
+
+.amount-large {
+  font-size: clamp(1.75rem, 8.4vw, var(--font-xl));
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+.stat {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.stat-label {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.stat-hint {
+  font-size: var(--font-footnote);
+  line-height: 1.38;
+  color: var(--text-secondary);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-size: var(--font-footnote);
+  font-weight: 600;
+  line-height: 1.38;
+  white-space: nowrap;
+}
+
+.badge-primary {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.badge-success {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.badge-warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.badge-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: var(--space-3) 14px;
+  border-radius: var(--radius-input);
+  font-size: var(--font-sm);
+  line-height: 1.4;
+}
+
+.note > svg {
+  margin-top: 1px;
+}
+
+.note-body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.note-info {
+  background: var(--primary-soft);
+  color: var(--text);
+}
+
+.note-info > svg {
+  color: var(--primary);
+}
+
+.note-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.empty-state {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: center;
+  text-align: center;
+  padding: var(--space-5) var(--space-4);
+  color: var(--text-secondary);
+}
+
+.empty-state-icon {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1);
+}
+
+.empty-state-title {
+  font-size: var(--font-title3);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+
+.empty-state-body {
+  max-width: 34ch;
+  font-size: var(--font-sm);
+}
+
+.empty-state-action {
+  margin-top: var(--space-2);
+  min-height: var(--touch-target);
+  display: inline-flex;
+  align-items: center;
+  font-weight: 600;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────────────────────────── */
+
+.btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  padding: 0 22px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--primary);
+  font-size: var(--font-base);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    transform 0.12s ease,
+    filter 0.12s ease,
+    opacity 0.12s ease,
+    background-color 0.15s ease;
+}
+
+/*
+ * A page may draw a button shorter than 48 px to fit a dense row. The touch target still reaches
+ * 48 px: this grows above and below only when the button is shorter than that, and never otherwise.
+ */
+.btn::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  inset-block: min(0px, calc((100% - var(--touch-target)) / 2));
+}
+
+.btn:hover {
+  text-decoration: none;
+}
+
+.btn-primary {
+  background: var(--primary-fill);
+  color: var(--on-primary-fill);
+}
+
+.btn-secondary {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.btn-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.btn-ghost {
+  padding: 0 var(--space-3);
+  background: transparent;
+  color: var(--primary);
+}
+
+.btn-block {
+  display: flex;
+  width: 100%;
+}
+
+@media (hover: hover) {
+  .btn:hover:not(:disabled) {
+    filter: brightness(0.95);
+  }
+
+  .btn-ghost:hover:not(:disabled) {
+    filter: none;
+    background: var(--primary-soft);
+  }
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
+  filter: brightness(0.9);
+}
+
+.btn-ghost:active:not(:disabled) {
+  filter: none;
+  opacity: 0.6;
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn[aria-busy="true"] {
+  cursor: progress;
+}
+
+/* ── Form controls: filled, no heavy border ──────────────────────────────────────────────────── */
+
+.field {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.field-label {
+  padding-inline: 2px;
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+
+.field-hint,
+.field-error {
+  padding-inline: 2px;
+  font-size: var(--font-footnote);
+  line-height: 1.38;
+}
+
+.field-hint {
+  color: var(--text-secondary);
+}
+
+.field-error {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+
+.control {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  margin: 0;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-input);
+  background: var(--surface-sunken);
+  color: var(--text);
+  /* 17 px. Anything under 16 px makes iOS Safari zoom the page when the field takes focus. */
+  font-size: var(--font-base);
+  line-height: 1.3;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: box-shadow 0.15s ease;
+}
+
+.control:focus-visible {
+  outline-offset: 1px;
+}
+
+.control:disabled {
+  opacity: 0.5;
+}
+
+.control[aria-invalid="true"] {
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+
+/* iOS Safari centres the value of a date field; min-height above stops it collapsing when empty. */
+input[type="date"].control,
+input[type="time"].control,
+input[type="datetime-local"].control {
+  text-align: start;
+}
+
+.control::-webkit-date-and-time-value {
+  text-align: start;
+}
+
+.control::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+
+.select-wrap {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.select-wrap > .control {
+  padding-inline-end: 44px;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+
+.select-chevron {
+  position: absolute;
+  inset-inline-end: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.money-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.money-field-code {
+  position: absolute;
+  inset-inline-start: var(--space-4);
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  pointer-events: none;
+}
+
+.money-field > .control {
+  text-align: right;
+}
+
+/* ── Quick links: a scrollable row of tinted capsules ────────────────────────────────────────── */
+
+.chip-row {
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+  /* Runs edge to edge, so a half-visible chip says "this scrolls". */
+  margin-inline: calc(-1 * var(--shell-padding, 0px));
+  padding-inline: var(--shell-padding, 0px);
+  /* Room for the chips' 48 px touch target, which is taller than they look. */
+  margin-block: -4px;
+  padding-block: 4px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: var(--shell-padding, 0px);
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chip-row::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 var(--space-4) 0 14px;
+  border-radius: var(--radius-pill);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  white-space: nowrap;
+  scroll-snap-align: start;
+  transition:
+    transform 0.12s ease,
+    filter 0.12s ease;
+}
+
+.chip::before {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
+}
+
+.chip:hover {
+  text-decoration: none;
+}
+
+@media (hover: hover) {
+  .chip:hover {
+    filter: brightness(0.95);
+  }
+}
+
+.chip:active {
+  transform: scale(0.97);
+  filter: brightness(0.9);
+}
+
+/* ── Tab bar: a floating glass capsule ───────────────────────────────────────────────────────── */
+
+.tabbar-wrap {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  padding: 0 max(12px, env(safe-area-inset-right, 0px)) var(--tabbar-offset)
+    max(12px, env(safe-area-inset-left, 0px));
+  /* Only the bar itself takes touches; the strip either side of it stays scrollable. */
+  pointer-events: none;
+}
+
+/* Content dissolves into the page colour as it passes under the bar, so labels stay legible. */
+.tabbar-wrap::before {
+  content: "";
+  position: absolute;
+  inset: -28px 0 0;
+  z-index: -1;
+  background: linear-gradient(to bottom, transparent, var(--bg-scrim) 72%);
+  pointer-events: none;
+}
+
+.tabbar {
+  --glass-solid: var(--surface-raised);
+  pointer-events: auto;
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--tabbar-bg);
+  box-shadow:
+    inset 0 1px 0 0 var(--glass-highlight),
+    0 0 0 var(--hairline) var(--glass-rim),
+    var(--shadow-float);
+}
+
+.tabbar-item {
+  /* Sized by its label, then sharing what is left: "Transactions" needs more room than "Plan". */
+  flex: 1 1 auto;
+  min-width: var(--touch-target);
+  min-height: 54px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px var(--space-2) 5px;
+  border-radius: var(--radius-pill);
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: 0.005em;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease,
+    transform 0.12s ease;
+}
+
+.tabbar-item:hover {
+  text-decoration: none;
+}
+
+@media (hover: hover) {
+  .tabbar-item:hover {
+    color: var(--text);
+  }
+}
+
+.tabbar-item:active {
+  transform: scale(0.95);
+}
+
+.tabbar-item[aria-current="page"] {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.tabbar-item:focus-visible {
+  outline-offset: -3px;
+}
+
+/* ── Fallbacks: these stay last so they win over the glass rules above ───────────────────────── */
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass,
+  .card-glass,
+  .tabbar {
+    background: var(--glass-solid, var(--surface));
+    border-color: var(--border);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .card-glass,
+  .tabbar {
+    background: var(--glass-solid, var(--surface));
+    border-color: var(--border);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .tabbar-wrap::before {
+    background: linear-gradient(to bottom, transparent, var(--bg) 72%);
+  }
+}
+
+:root[data-reduce-transparency="true"] :is(.glass, .card-glass, .tabbar) {
+  background: var(--glass-solid, var(--surface));
+  border-color: var(--border);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root[data-reduce-transparency="true"] .tabbar-wrap::before {
+  background: linear-gradient(to bottom, transparent, var(--bg) 72%);
+}
+
+/* More contrast on request: surfaces get an edge, and glass becomes solid. */
+@media (prefers-contrast: more) {
+  .card,
+  .control,
+  .badge,
+  .chip,
+  .btn-secondary,
+  .btn-danger {
+    border: 1px solid var(--text-secondary);
+  }
+
+  .glass,
+  .card-glass,
+  .tabbar {
+    background: var(--glass-solid, var(--surface));
+    border-color: var(--text-secondary);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .btn:active:not(:disabled),
+  .chip:active,
+  .tabbar-item:active {
+    transform: none;
+  }
 }

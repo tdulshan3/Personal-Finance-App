@@ -15,9 +15,13 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // Tells the browser both schemes are handled, so a dark-mode load does not flash white first.
+  colorScheme: "light dark",
+  // The grouped page background in each scheme (--bg in globals.css), so the browser chrome and
+  // the status bar continue the page rather than framing it.
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f3f6fc" },
-    { media: "(prefers-color-scheme: dark)", color: "#0b1220" },
+    { media: "(prefers-color-scheme: light)", color: "#f2f2f7" },
+    { media: "(prefers-color-scheme: dark)", color: "#000000" },
   ],
 };
 

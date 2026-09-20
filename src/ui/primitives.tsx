@@ -1,7 +1,12 @@
+import Link from "next/link";
+
+import type { Route } from "next";
 import type { CSSProperties, ReactNode } from "react";
 
 import type { Money } from "../core/domain/money.ts";
 import { formatMoney, isNegative } from "../core/domain/money.ts";
+import { cx } from "./cx.ts";
+import { AlertIcon, ChevronRightIcon, InfoIcon } from "./icons.tsx";
 
 /**
  * Shared presentational pieces.
@@ -9,49 +14,47 @@ import { formatMoney, isNegative } from "../core/domain/money.ts";
  * buildspec.md §13 asks for accurate labels and for income/expense to be distinguished "with signs
  * and labels, not color alone", which is why every amount here can carry a text label and never
  * relies on red/green by itself.
+ *
+ * The look lives in `src/app/globals.css` as classes rather than inline styles, so that pressed,
+ * hover, focus and disabled states — which an inline style cannot express — all work. Every
+ * component still accepts `style` for a one-off override.
  */
 
+/**
+ * An iOS inset-grouped section.
+ *
+ * The `title` and `action` sit above the rounded container, the way a grouped list names its
+ * sections, rather than inside it. `footer` is the small explanatory text iOS puts underneath.
+ */
 export function Card({
   children,
   title,
   action,
   tone = "solid",
   style,
+  footer,
 }: {
   children: ReactNode;
   title?: ReactNode;
   action?: ReactNode;
   /** §13: glass is for navigation, sheets "and a few summary surfaces" only. */
   tone?: "solid" | "glass";
+  /** Applied to the rounded container itself. */
   style?: CSSProperties;
+  footer?: ReactNode | undefined;
 }) {
   return (
-    <section
-      className={tone === "glass" ? "glass" : undefined}
-      style={{
-        background: tone === "glass" ? undefined : "var(--surface)",
-        border: tone === "glass" ? undefined : "1px solid var(--border)",
-        borderRadius: "var(--radius-card)",
-        padding: "var(--space-5)",
-        boxShadow: "var(--shadow-card)",
-        ...style,
-      }}
-    >
-      {(title || action) && (
-        <header
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "var(--space-3)",
-            marginBottom: "var(--space-4)",
-          }}
-        >
-          {typeof title === "string" ? <h2>{title}</h2> : title}
-          {action}
+    <section className="card-section">
+      {title || action ? (
+        <header className="section-header">
+          {typeof title === "string" ? <h2 className="section-title">{title}</h2> : title}
+          {action ? <div className="section-action">{action}</div> : null}
         </header>
-      )}
-      {children}
+      ) : null}
+      <div className={tone === "glass" ? "card card-glass glass" : "card"} style={style}>
+        {children}
+      </div>
+      {footer ? <p className="section-footer">{footer}</p> : null}
     </section>
   );
 }
@@ -74,21 +77,15 @@ export function Amount({
   srLabel?: string;
 }) {
   const text = formatMoney(value, { signed });
-  const color =
-    emphasis === "muted"
-      ? "var(--text-secondary)"
-      : isNegative(value)
-        ? "var(--danger)"
-        : "var(--text)";
   return (
     <span
-      className="money"
-      style={{
-        color,
-        fontSize: emphasis === "large" ? "var(--font-xl)" : "inherit",
-        fontWeight: emphasis === "large" ? 700 : 560,
-        letterSpacing: emphasis === "large" ? "-0.02em" : undefined,
-      }}
+      className={cx(
+        "money",
+        "amount",
+        emphasis === "large" && "amount-large",
+        // Red is a second cue only: the sign in the text and `srLabel` carry the meaning.
+        emphasis === "muted" ? "amount-muted" : isNegative(value) && "amount-negative",
+      )}
     >
       {srLabel ? <span className="visually-hidden">{srLabel} </span> : null}
       {text}
@@ -106,12 +103,10 @@ export function Stat({
   hint?: ReactNode;
 }) {
   return (
-    <div style={{ display: "grid", gap: "var(--space-1)" }}>
-      <span style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>{label}</span>
+    <div className="stat">
+      <span className="stat-label">{label}</span>
       {value}
-      {hint ? (
-        <span style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>{hint}</span>
-      ) : null}
+      {hint ? <span className="stat-hint">{hint}</span> : null}
     </div>
   );
 }
@@ -123,59 +118,36 @@ export function Badge({
   children: ReactNode;
   tone?: "neutral" | "warning" | "danger" | "success" | "primary";
 }) {
-  const palette: Record<string, { bg: string; fg: string }> = {
-    neutral: { bg: "var(--surface-sunken)", fg: "var(--text-secondary)" },
-    warning: { bg: "var(--warning-soft)", fg: "var(--warning)" },
-    danger: { bg: "var(--danger-soft)", fg: "var(--danger)" },
-    success: { bg: "var(--success-soft)", fg: "var(--success)" },
-    primary: { bg: "var(--primary-soft)", fg: "var(--primary)" },
-  };
-  const colors = palette[tone] ?? palette.neutral!;
-  return (
-    <span
-      style={{
-        background: colors.bg,
-        color: colors.fg,
-        borderRadius: "var(--radius-pill)",
-        padding: "2px 10px",
-        fontSize: "var(--font-sm)",
-        fontWeight: 560,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </span>
-  );
+  return <span className={cx("badge", tone !== "neutral" && `badge-${tone}`)}>{children}</span>;
 }
 
 export function EmptyState({
   title,
   body,
   action,
+  icon,
 }: {
   title: string;
   body: string;
   action?: ReactNode;
+  icon?: ReactNode | undefined;
 }) {
   // buildspec.md §13: "Include empty, loading, offline, permission-denied ... states."
   return (
-    <div
-      style={{
-        display: "grid",
-        gap: "var(--space-3)",
-        justifyItems: "center",
-        textAlign: "center",
-        padding: "var(--space-6) var(--space-4)",
-        color: "var(--text-secondary)",
-      }}
-    >
-      <h3 style={{ color: "var(--text)" }}>{title}</h3>
-      <p style={{ maxWidth: "34ch" }}>{body}</p>
-      {action}
+    <div className="empty-state">
+      {icon ? (
+        <span className="empty-state-icon" aria-hidden="true">
+          {icon}
+        </span>
+      ) : null}
+      <h3 className="empty-state-title">{title}</h3>
+      <p className="empty-state-body">{body}</p>
+      {action ? <div className="empty-state-action">{action}</div> : null}
     </div>
   );
 }
 
+/** An iOS large title, with an optional trailing action and a footnote underneath. */
 export function PageHeader({
   title,
   subtitle,
@@ -186,72 +158,143 @@ export function PageHeader({
   action?: ReactNode;
 }) {
   return (
-    <header
-      style={{
-        display: "flex",
-        alignItems: "flex-end",
-        justifyContent: "space-between",
-        gap: "var(--space-4)",
-        marginBottom: "var(--space-5)",
-      }}
-    >
-      <div style={{ display: "grid", gap: "var(--space-1)" }}>
+    <header className="page-header">
+      <div className="page-header-text">
         <h1>{title}</h1>
-        {subtitle ? (
-          <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-sm)" }}>{subtitle}</p>
-        ) : null}
+        {subtitle ? <p className="page-subtitle">{subtitle}</p> : null}
       </div>
-      {action}
+      {action ? <div className="page-header-action">{action}</div> : null}
     </header>
   );
 }
 
 export function Shell({ children }: { children: ReactNode }) {
-  return (
-    <main
-      style={{
-        maxWidth: "760px",
-        margin: "0 auto",
-        // §13: "16–24 dp screen padding"
-        padding: "var(--space-5) var(--space-4) var(--space-6)",
-        display: "grid",
-        gap: "var(--space-5)",
-      }}
-    >
-      {children}
-    </main>
-  );
+  return <main className="shell">{children}</main>;
 }
 
+/** The icon means an error is never signalled by red alone. */
 export function ErrorNote({ children }: { children: ReactNode }) {
   return (
-    <p
-      role="alert"
-      style={{
-        background: "var(--danger-soft)",
-        color: "var(--danger)",
-        borderRadius: "var(--radius-input)",
-        padding: "var(--space-3) var(--space-4)",
-        fontSize: "var(--font-sm)",
-      }}
-    >
-      {children}
-    </p>
+    <div role="alert" className="note note-danger">
+      <AlertIcon size={20} />
+      <div className="note-body">{children}</div>
+    </div>
   );
 }
 
 export function InfoNote({ children }: { children: ReactNode }) {
   return (
-    <p
-      style={{
-        background: "var(--primary-soft)",
-        color: "var(--primary)",
-        borderRadius: "var(--radius-input)",
-        padding: "var(--space-3) var(--space-4)",
-        fontSize: "var(--font-sm)",
-      }}
+    <div className="note note-info">
+      <InfoIcon size={20} />
+      <div className="note-body">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Rows separated by hairlines that start under the text rather than at the card's edge, the way
+ * iOS draws them. Put a `List` straight inside a `Card` and it fills the card edge to edge.
+ *
+ * `role="list"` is deliberate: Safari drops list semantics from a `<ul>` with `list-style: none`,
+ * and VoiceOver then stops announcing "list, 5 items".
+ */
+export function List({
+  children,
+  style,
+}: {
+  children: ReactNode;
+  style?: CSSProperties | undefined;
+}) {
+  return (
+    <ul className="list" role="list" style={style}>
+      {children}
+    </ul>
+  );
+}
+
+export function ListRow<T extends string>({
+  children,
+  subtitle,
+  leading,
+  leadingTone,
+  trailing,
+  href,
+  chevron,
+}: {
+  /** The row's main line. */
+  children: ReactNode;
+  subtitle?: ReactNode | undefined;
+  /** Usually a 18 px icon; it is drawn inside a tinted rounded tile. */
+  leading?: ReactNode | undefined;
+  leadingTone?: "primary" | "success" | "warning" | "danger" | "neutral" | undefined;
+  /** A value, an `Amount` or a `Badge` on the trailing side. */
+  trailing?: ReactNode | undefined;
+  /** Makes the whole row a link. */
+  href?: Route<T> | undefined;
+  /** Defaults to true for a row with an `href`. */
+  chevron?: boolean | undefined;
+}) {
+  const showChevron = chevron ?? href !== undefined;
+  const content = (
+    <>
+      {leading ? (
+        <span className="list-row-leading" data-tone={leadingTone}>
+          {leading}
+        </span>
+      ) : null}
+      <span className="list-row-body">
+        <span>{children}</span>
+        {subtitle ? <span className="list-row-subtitle">{subtitle}</span> : null}
+      </span>
+      {trailing ? <span className="list-row-trailing">{trailing}</span> : null}
+      {showChevron ? <ChevronRightIcon size={18} className="list-row-chevron" /> : null}
+    </>
+  );
+
+  return (
+    <li className={cx("list-row", leading ? "has-leading" : undefined)}>
+      {href !== undefined ? (
+        <Link href={href} className="list-row-content">
+          {content}
+        </Link>
+      ) : (
+        <div className="list-row-content">{content}</div>
+      )}
+    </li>
+  );
+}
+
+/**
+ * A link that looks like a `Button`, for navigation that should read as an action ("Add").
+ *
+ * Use this rather than styling a `Link` by hand: in dark mode the accent used for text
+ * (`--primary`) is too light to sit behind white, which is why filled surfaces have their own
+ * `--primary-fill` token.
+ */
+export function ButtonLink<T extends string>({
+  href,
+  children,
+  variant = "primary",
+  block = false,
+  style,
+  "aria-label": ariaLabel,
+}: {
+  href: Route<T>;
+  children: ReactNode;
+  variant?: "primary" | "secondary" | "danger" | "ghost" | undefined;
+  /** Stretch to the full width of the container. */
+  block?: boolean | undefined;
+  style?: CSSProperties | undefined;
+  "aria-label"?: string | undefined;
+}) {
+  return (
+    <Link
+      href={href}
+      className={cx("btn", `btn-${variant}`, block && "btn-block")}
+      style={style}
+      aria-label={ariaLabel}
     >
       {children}
-    </p>
+    </Link>
   );
 }

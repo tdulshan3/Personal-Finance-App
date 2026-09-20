@@ -1,8 +1,16 @@
+import { redirect } from "next/navigation";
+
+import { accessState } from "../../server/session.ts";
 import { NotBuiltYet } from "../../ui/not-built.tsx";
 
 export const dynamic = "force-dynamic";
 
-export default function BillsPage() {
+export default async function BillsPage() {
+  // Same gate as every other screen: nothing renders before the vault is open.
+  const access = await accessState();
+  if (access.kind === "needs-setup") redirect("/setup");
+  if (access.kind !== "ready") redirect("/unlock");
+
   return (
     <NotBuiltYet
       title="Bills"
