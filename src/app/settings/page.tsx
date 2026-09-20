@@ -3,8 +3,12 @@ import { redirect } from "next/navigation";
 import { createModelSettingsService, EndpointRole } from "../../core/services/model-settings-service.ts";
 import { requireDb } from "../../server/runtime.ts";
 import { accessState } from "../../server/session.ts";
+import { headers } from "next/headers";
+
 import { Badge, Card, PageHeader, Shell } from "../../ui/primitives.tsx";
 import { EndpointCard } from "./endpoint-card.tsx";
+import { smsOverview } from "./sms-actions.ts";
+import { SmsCard } from "./sms-card.tsx";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +25,14 @@ export default async function SettingsPage() {
   if (access.kind !== "ready") redirect("/unlock");
 
   const settings = createModelSettingsService(requireDb());
+  const sms = await smsOverview();
+
+  /*
+   * The collector posts from another device, so the URL it needs is whatever host this page was
+   * reached on -- not localhost, which would be the phone talking to itself.
+   */
+  const host = (await headers()).get("host") ?? "192.168.1.118:8090";
+  const webhookUrl = `http://${host}/api/v1/sources/sms-webhook`;
   const extraction = settings.read(EndpointRole.EXTRACTION);
   const agent = settings.read(EndpointRole.AGENT);
 
@@ -30,6 +42,8 @@ export default async function SettingsPage() {
         title="Settings"
         subtitle="Two separate AI configurations. Saving one never changes the other."
       />
+
+      <SmsCard overview={sms} webhookUrl={webhookUrl} />
 
       <EndpointCard
         role={EndpointRole.EXTRACTION}
