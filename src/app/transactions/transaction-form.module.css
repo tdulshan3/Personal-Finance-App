@@ -1,0 +1,29 @@
+/*
+ * Layout shared by the two transaction forms (new and edit).
+ *
+ * On a phone these wrappers have no box at all (`display: contents`), so every field is still a
+ * full-width row of the form, spaced by `.form-row` exactly as before. From 1024 px the short
+ * fields sit two to a line instead of each stretching across the card.
+ */
+
+.pairs,
+.cell,
+.cellWide {
+  display: contents;
+}
+
+@media (min-width: 1024px) {
+  .pairs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    /* The row gap is `.form-row`'s own, so paired and unpaired fields keep one rhythm. */
+    gap: 18px var(--space-5);
+    align-items: start;
+  }
+
+  /* A field that should keep a line to itself, so the two after it pair up. */
+  .cellWide {
+    display: block;
+    grid-column: 1 / -1;
+  }
+}

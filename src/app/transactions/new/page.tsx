@@ -8,7 +8,11 @@ import { NewTransactionForm } from "./new-transaction-form.tsx";
 
 export const dynamic = "force-dynamic";
 
-/** buildspec.md §13: "Keep a visible Add button available without chat." This is where it leads. */
+/**
+ * buildspec.md §13: "Keep a visible Add button available without chat." This is where it leads.
+ *
+ * One form, so the page stays `narrow` on a desktop rather than stretching its fields.
+ */
 export default async function NewTransactionPage() {
   const access = await accessState();
   if (access.kind === "needs-setup") redirect("/setup");
@@ -21,7 +25,7 @@ export default async function NewTransactionPage() {
 
   if (accounts.length === 0) {
     return (
-      <Shell>
+      <Shell width="narrow">
         <PageHeader title="Add a transaction" />
         <Card>
           <EmptyState
@@ -35,7 +39,7 @@ export default async function NewTransactionPage() {
   }
 
   return (
-    <Shell>
+    <Shell width="narrow">
       <PageHeader title="Add a transaction" subtitle="Recorded locally. Nothing is sent anywhere." />
       <Card>
         <NewTransactionForm

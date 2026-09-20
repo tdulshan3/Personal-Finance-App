@@ -5,7 +5,7 @@ import { localDateOf } from "../../core/domain/time.ts";
 import { requireService } from "../../server/runtime.ts";
 import { accessState } from "../../server/session.ts";
 import { labelForAccountType } from "../../ui/labels.ts";
-import { Card, EmptyState, PageHeader, Shell } from "../../ui/primitives.tsx";
+import { Card, Columns, EmptyState, PageHeader, Shell, Stack } from "../../ui/primitives.tsx";
 import type { AccountRowData } from "./account-row.tsx";
 import { AccountRow } from "./account-row.tsx";
 import { NewAccountForm } from "./new-account-form.tsx";
@@ -19,6 +19,9 @@ export const dynamic = "force-dynamic";
  * display balance type, freshness and tracking start; reconcile." Alias mapping and reconciliation
  * belong to M2 and M4. What is here is labelled for what it is — a recorded balance, not a live
  * bank balance (§13: "Avoid presenting a stale SMS-derived balance as a live bank balance").
+ *
+ * On a desktop the accounts are the main column and the add form stays in view beside them; a
+ * phone reads the same cards top to bottom, form last.
  */
 export default async function AccountsPage() {
   const access = await accessState();
@@ -61,40 +64,46 @@ export default async function AccountsPage() {
         subtitle="Recorded balances, calculated from what this app knows."
       />
 
-      {active.length === 0 ? (
-        <Card>
-          <EmptyState
-            title="No accounts yet"
-            body="Add the accounts you want to track. You can supply a verified balance now or later."
-          />
-        </Card>
-      ) : (
-        <Card title="Your accounts">
-          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "var(--space-4)" }}>
-            {active.map((row) => (
-              <AccountRow key={row.account.id} data={toRowData(row)} />
-            ))}
-          </ul>
-        </Card>
-      )}
+      <Columns layout="main-aside">
+        <Stack>
+          {active.length === 0 ? (
+            <Card>
+              <EmptyState
+                title="No accounts yet"
+                body="Add the accounts you want to track. You can supply a verified balance now or later."
+              />
+            </Card>
+          ) : (
+            <Card title="Your accounts">
+              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "var(--space-4)" }}>
+                {active.map((row) => (
+                  <AccountRow key={row.account.id} data={toRowData(row)} />
+                ))}
+              </ul>
+            </Card>
+          )}
 
-      {archived.length > 0 ? (
-        <Card title="Archived">
-          <p style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)", marginBottom: "var(--space-4)" }}>
-            These keep every transaction recorded against them, and their balances still compute.
-            They simply do not accept new entries.
-          </p>
-          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "var(--space-4)" }}>
-            {archived.map((row) => (
-              <AccountRow key={row.account.id} data={toRowData(row)} />
-            ))}
-          </ul>
-        </Card>
-      ) : null}
+          {archived.length > 0 ? (
+            <Card title="Archived">
+              <p style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)", marginBottom: "var(--space-4)" }}>
+                These keep every transaction recorded against them, and their balances still compute.
+                They simply do not accept new entries.
+              </p>
+              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "var(--space-4)" }}>
+                {archived.map((row) => (
+                  <AccountRow key={row.account.id} data={toRowData(row)} />
+                ))}
+              </ul>
+            </Card>
+          ) : null}
+        </Stack>
 
-      <Card title="Add an account">
-        <NewAccountForm currencies={SUPPORTED_CURRENCIES.map((c) => c.code)} today={today} />
-      </Card>
+        <Stack sticky>
+          <Card title="Add an account">
+            <NewAccountForm currencies={SUPPORTED_CURRENCIES.map((c) => c.code)} today={today} />
+          </Card>
+        </Stack>
+      </Columns>
     </Shell>
   );
 }

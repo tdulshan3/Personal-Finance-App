@@ -1,0 +1,226 @@
+/*
+ * The transactions list.
+ *
+ * The rules outside a media query are the phone row exactly as it has always been drawn. The
+ * desktop rules further down re-arrange the same markup into a table; nothing is rendered twice.
+ * Every colour and distance is a design token.
+ */
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-4);
+}
+
+/* Column names only make sense once there are columns. */
+.head {
+  display: none;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+/* The global "no separator after a card's last row" rule cannot see through the list's wrapper. */
+.row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.rowMain {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/*
+ * The merchant and its badges are one table cell, so the markup groups them. On a phone the group
+ * has no box and `order` restores the sequence the row has always had: merchant, date line, badges.
+ */
+.rowHead {
+  display: contents;
+}
+
+.rowTitle {
+  font-weight: 560;
+}
+
+.rowMeta {
+  order: 1;
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+}
+
+/*
+ * Date, type and category are separate elements so the table can give them their own cells. On a
+ * phone they still read as one line: "2026-09-14 · Expense · Groceries".
+ */
+.rowMeta span + span::before {
+  content: " · ";
+}
+
+.rowBadges {
+  order: 2;
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.rowTrailing {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: end;
+}
+
+/* ── Filters: search across the top, then the four narrowing controls two by two ─────────────── */
+
+.filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.filterWide {
+  grid-column: 1 / -1;
+}
+
+.filterLabel {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--font-footnote);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Half a phone's width is tight for "mm/dd/yyyy" plus the calendar glyph; give the text the room. */
+.filterLabel input {
+  padding-inline: var(--space-3);
+  font-weight: 400;
+}
+
+/* ── Desktop: rows read as a table ───────────────────────────────────────────────────────────── */
+
+@media (min-width: 1024px) {
+  /*
+   * The list measures itself rather than the window. Beside the filters at 1280 px it is narrower
+   * than it is on its own at 1100 px, and a table squeezed into that is worse than the phone row —
+   * so below 600 px of list the phone row simply stays.
+   */
+  .ledger {
+    container-type: inline-size;
+  }
+
+  @container (min-width: 600px) {
+    /* date · merchant · category · amount · action. `auto` columns fit their widest cell. */
+    .rows {
+      grid-template-columns: auto minmax(7rem, 1fr) fit-content(12rem) auto auto;
+      gap: 0 var(--space-4);
+    }
+
+    /* Every row borrows the list's columns, which is what lines the cells up across rows. */
+    .head,
+    .row {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: subgrid;
+    }
+
+    .head {
+      padding-bottom: var(--space-2);
+      border-bottom: var(--hairline) solid var(--border);
+      font-size: var(--font-footnote);
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    .headAmount {
+      text-align: right;
+    }
+
+    /* One line of cells per record, sharing a baseline: date, merchant, category, amount, action. */
+    .row {
+      align-items: baseline;
+      gap: 0 var(--space-4);
+      padding: var(--space-3) 0;
+    }
+
+    /*
+     * The phone's groupings dissolve so each piece can be placed in its own cell. Every cell names
+     * its row as well as its column: the markup is not in column order, and auto-placement would
+     * start a new line each time it had to step back to an earlier column.
+     */
+    .rowMain,
+    .rowMeta,
+    .rowTrailing {
+      display: contents;
+    }
+
+    .rowMeta span + span::before {
+      content: none;
+    }
+
+    .rowDate {
+      grid-area: 1 / 1;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Merchant, with any badges on a second line beneath it. */
+    .rowHead {
+      grid-area: 1 / 2;
+      display: grid;
+      gap: var(--space-1);
+      justify-items: start;
+      min-width: 0;
+    }
+
+    .rowTitle {
+      overflow-wrap: anywhere;
+    }
+
+    /* An empty badge line must not hold a gap open under the merchant. */
+    .rowBadges:empty {
+      display: none;
+    }
+
+    /* Category, with the type beneath it — or the type alone when there is none (a transfer). */
+    .rowWhat {
+      grid-area: 1 / 3;
+      display: grid;
+      gap: 2px;
+    }
+
+    .rowCategory {
+      order: -1;
+      color: var(--text);
+    }
+
+    .rowKind:not(:only-child) {
+      font-size: var(--font-footnote);
+    }
+
+    .rowTrailing > span {
+      grid-area: 1 / 4;
+      justify-self: end;
+    }
+
+    /*
+     * The button is 36 px tall in a line of text. Pulling its margins in lets it centre on that
+     * line and spill into the row's padding, instead of making a one-line row taller.
+     */
+    .rowTrailing > form {
+      grid-area: 1 / 5;
+      justify-self: end;
+      margin-block: -7px;
+    }
+  }
+}
