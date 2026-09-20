@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { startTransition, useActionState, useState } from "react";
 
 import { Badge, Card, ErrorNote } from "../../ui/primitives.tsx";
 import { Button, Field, FormRow, Select, SubmitButton, TextInput } from "../../ui/form.tsx";
@@ -55,7 +55,7 @@ export function EndpointCard({
   const [baseUrl, setBaseUrl] = useState(current?.baseUrl ?? "");
   const [selectedModel, setSelectedModel] = useState(current?.modelName ?? "");
   const [testState, runTest] = useActionState<EndpointFormState, FormData>(testEndpointAction, {});
-  const [saveState, runSave] = useActionState<EndpointFormState, FormData>(saveEndpointAction, {});
+  const [saveState, runSave, isSaving] = useActionState<EndpointFormState, FormData>(saveEndpointAction, {});
 
   const models = testState.models ?? [];
   const hasProbed = models.length > 0;
@@ -157,7 +157,19 @@ export function EndpointCard({
         ) : null}
 
         {hasProbed ? (
-          <form action={runSave}>
+          /*
+           * `onSubmit`, not `action={...}`: React 19 resets a form when its action settles, which
+           * snaps this controlled select back to "Choose a model…" straight after a successful
+           * save, so the screen says nothing is chosen while the database says otherwise.
+           */
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (isSaving) return;
+              const formData = new FormData(event.currentTarget);
+              startTransition(() => runSave(formData));
+            }}
+          >
             <input type="hidden" name="role" value={role} />
             <input type="hidden" name="baseUrl" value={baseUrl} />
             <FormRow>
@@ -185,7 +197,9 @@ export function EndpointCard({
                   </Select>
                 )}
               </Field>
-              <SubmitButton pendingLabel="Saving…">Save {title.toLowerCase()}</SubmitButton>
+              <Button disabled={isSaving} aria-busy={isSaving}>
+                {isSaving ? "Saving…" : `Save ${title.toLowerCase()}`}
+              </Button>
             </FormRow>
           </form>
         ) : null}
@@ -193,7 +207,7 @@ export function EndpointCard({
         {saveState.error ? <ErrorNote>{saveState.error}</ErrorNote> : null}
         {saveState.ok ? (
           <p role="status" style={{ fontSize: "var(--font-sm)", color: "var(--success)" }}>
-            {saveState.ok}. Reload to see it above.
+            {saveState.ok}.
           </p>
         ) : null}
 

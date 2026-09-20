@@ -1,9 +1,9 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 
 import { ErrorNote, InfoNote } from "../../ui/primitives.tsx";
-import { Field, FormRow, MoneyInput, Select, SubmitButton, TextInput } from "../../ui/form.tsx";
+import { Button, Field, FormRow, MoneyInput, Select, TextInput } from "../../ui/form.tsx";
 import type { ActionState } from "../actions.ts";
 import { createAccountAction } from "../actions.ts";
 
@@ -23,14 +23,37 @@ export function NewAccountForm({
   currencies: readonly string[];
   today: string;
 }) {
-  const [state, formAction] = useActionState<ActionState, FormData>(createAccountAction, {});
+  const [state, formAction, isPending] = useActionState<ActionState, FormData>(createAccountAction, {});
+  const formRef = useRef<HTMLFormElement>(null);
+
   const [currency, setCurrency] = useState("LKR");
   const [type, setType] = useState<string>("bank");
+
+  // A created account clears the form for the next one; an error leaves every field as typed.
+  useEffect(() => {
+    if (!state.ok) return;
+    formRef.current?.reset();
+    setType("bank");
+    setCurrency("LKR");
+  }, [state]);
 
   const isDebt = type === "credit_card" || type === "loan";
 
   return (
-    <form action={formAction}>
+    /*
+     * `onSubmit`, not `action={...}`: React 19 resets a form when its action settles, even on a
+     * validation error. The controlled Type select would snap back to "Bank" while state still said
+     * "Credit card", and the retry would create an asset where the owner chose a debt.
+     */
+    <form
+      ref={formRef}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (isPending) return;
+        const formData = new FormData(event.currentTarget);
+        startTransition(() => formAction(formData));
+      }}
+    >
       <FormRow>
         <Field label="Name">
           {({ id, describedBy }) => (
@@ -156,7 +179,9 @@ export function NewAccountForm({
           </p>
         ) : null}
 
-        <SubmitButton pendingLabel="Creating…">Create account</SubmitButton>
+        <Button disabled={isPending} aria-busy={isPending}>
+          {isPending ? "Creating…" : "Create account"}
+        </Button>
       </FormRow>
     </form>
   );
