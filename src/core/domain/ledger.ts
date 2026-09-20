@@ -77,9 +77,42 @@ export type LedgerAccount = {
   readonly institution?: string | undefined;
   /** buildspec.md §9.4: the boundary before which imported rows stay history-only. */
   readonly trackingStartAt?: Instant | undefined;
+  /**
+   * buildspec.md §10: "A credit limit is not a balance." Stored beside the account, never summed
+   * into one, and never counted as spendable money. Only meaningful on a credit line.
+   */
+  readonly creditLimit?: Money | undefined;
   readonly revision: number;
   readonly archivedAt?: Instant | undefined;
 };
+
+/**
+ * What is left to spend on a credit line.
+ *
+ * `balance` is the displayed figure — positive when money is owed, negative when the card is in
+ * credit. Available credit is therefore limit minus balance, and a card in credit has *more*
+ * available than its limit, which is correct rather than a bug (buildspec.md §20: "Negative
+ * credit-card balance | Display credit balance correctly; do not label it debt owed").
+ *
+ * Returns undefined when no limit is recorded, because guessing one would invent a number the
+ * owner never supplied.
+ */
+export function availableCredit(account: LedgerAccount, balance: Money): Money | undefined {
+  if (account.kind !== AccountKind.LIABILITY || !account.creditLimit) return undefined;
+  if (account.creditLimit.currency.code !== balance.currency.code) return undefined;
+  return money(account.creditLimit.currency, account.creditLimit.minor - balance.minor);
+}
+
+/**
+ * How much of the limit is in use, 0-1, or undefined when there is no limit to compare against.
+ * Clamped at zero so a card in credit reads as 0% rather than a negative percentage.
+ */
+export function creditUtilisation(account: LedgerAccount, balance: Money): number | undefined {
+  if (account.kind !== AccountKind.LIABILITY || !account.creditLimit) return undefined;
+  if (account.creditLimit.minor <= 0n) return undefined;
+  const used = balance.minor <= 0n ? 0 : Number(balance.minor) / Number(account.creditLimit.minor);
+  return Math.max(0, used);
+}
 
 /**
  * buildspec.md §9.2: "Expense accounts normally hold positive values; income and equity accounts

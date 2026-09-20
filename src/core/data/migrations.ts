@@ -591,10 +591,23 @@ CREATE UNIQUE INDEX uq_jobs_active ON jobs (kind, dedupe_key)
 CREATE INDEX idx_jobs_runnable ON jobs (state, next_run_at);
 `;
 
+
+/* -------------------------------------------------------------------------------------------- */
+/* 004 — credit limits (buildspec.md §10)                                                         */
+/* -------------------------------------------------------------------------------------------- */
+
+const MIGRATION_004 = /* sql */ `
+-- buildspec.md §10: "A credit limit is not a balance." It is stored in its own column, never
+-- summed with journal entries, and never counted as liquid money (§12 excludes credit limits from
+-- the spendable balance). It exists to derive available credit and to show a utilisation figure.
+ALTER TABLE ledger_accounts ADD COLUMN credit_limit_minor INTEGER;
+`;
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   Object.freeze({ version: 1, name: "ledger-foundation", sql: MIGRATION_001 }),
   Object.freeze({ version: 2, name: "inference-endpoints", sql: MIGRATION_002 }),
   Object.freeze({ version: 3, name: "message-sources-and-jobs", sql: MIGRATION_003 }),
+  Object.freeze({ version: 4, name: "credit-limits", sql: MIGRATION_004 }),
 ]);
 
 function checksumOf(migration: Migration): string {

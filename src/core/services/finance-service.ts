@@ -6,7 +6,7 @@ import type { LedgerRepository } from "../data/ledger-repository.ts";
 import { createLedgerRepository } from "../data/ledger-repository.ts";
 import { notFound, validationError } from "../domain/errors.ts";
 import type { LedgerAccount } from "../domain/ledger.ts";
-import { AccountKind, AccountType, LiquidityRole } from "../domain/ledger.ts";
+import { AccountKind, AccountType, LiquidityRole, availableCredit, creditUtilisation } from "../domain/ledger.ts";
 import type { Currency, Money } from "../domain/money.ts";
 import { money, requireCurrency } from "../domain/money.ts";
 import type {
@@ -216,6 +216,7 @@ export function createFinanceService(options: FinanceServiceOptions) {
     institution?: string | undefined;
     liquidityRole?: LiquidityRole;
     trackingStartAt?: Instant | undefined;
+    creditLimit?: Money | undefined;
   }): LedgerAccount {
     if (input.name.trim().length === 0) throw validationError("Account name is required");
     if (
@@ -250,19 +251,66 @@ export function createFinanceService(options: FinanceServiceOptions) {
         institution: input.institution,
         trackingStartAt: input.trackingStartAt,
         isUserVisible: true,
+        ...(input.creditLimit ? { creditLimitMinor: input.creditLimit.minor } : {}),
       },
       clock.now(),
     );
   }
 
-  function archiveAccount(accountId: string): void {
-    const account = repo.findAccount(accountId);
-    if (!account) throw notFound("Account", accountId);
-    // buildspec.md §13: "Accounts with history are archived, not physically removed."
-    db.prepare("UPDATE ledger_accounts SET archived_at = ?, revision = revision + 1 WHERE id = ?").run(
-      clock.now(),
-      accountId,
-    );
+  /**
+   * Edits an account's owner-facing details.
+   *
+   * Currency and kind are deliberately not editable. Every journal already posted to the account
+   * assumes both, and §17.3 rejects a journal whose account currency differs from its own — so
+   * changing them would either invalidate history or silently mis-state it.
+   */
+  function updateAccount(input: {
+    accountId: string;
+    expectedRevision: number;
+    name?: string | undefined;
+    institution?: string | null | undefined;
+    creditLimit?: Money | null | undefined;
+  }): LedgerAccount {
+    const account = repo.findAccount(input.accountId);
+    if (!account) throw notFound("Account", input.accountId);
+
+    if (input.creditLimit != null) {
+      if (account.kind !== AccountKind.LIABILITY) {
+        throw validationError("A credit limit only applies to a credit card or loan", {
+          account_id: account.id,
+        });
+      }
+      if (input.creditLimit.currency.code !== account.currency.code) {
+        throw validationError(
+          `The limit must be in ${account.currency.code}, the account's own currency`,
+        );
+      }
+      if (input.creditLimit.minor < 0n) throw validationError("A credit limit cannot be negative");
+    }
+
+    return repo.updateAccount({
+      id: input.accountId,
+      expectedRevision: input.expectedRevision,
+      name: input.name,
+      institution: input.institution,
+      creditLimitMinor:
+        input.creditLimit === undefined ? undefined : (input.creditLimit?.minor ?? null),
+      now: clock.now(),
+    });
+  }
+
+  /** buildspec.md §13: archiving preserves history; it is not deletion, and it is reversible. */
+  function archiveAccount(accountId: string): LedgerAccount {
+    return repo.setAccountArchived(accountId, true, clock.now());
+  }
+
+  function unarchiveAccount(accountId: string): LedgerAccount {
+    return repo.setAccountArchived(accountId, false, clock.now());
+  }
+
+  /** What archiving would preserve, so the screen can say it rather than imply it. */
+  function accountUsage(accountId: string) {
+    return repo.accountUsage(accountId);
   }
 
   function setOpeningBalance(
@@ -545,12 +593,25 @@ export function createFinanceService(options: FinanceServiceOptions) {
     );
   }
 
-  /** Per-currency totals for the Accounts screen and Home. */
-  function accountBalances(asOf?: Instant) {
-    return repo.listAccounts().map((account) => ({
-      account,
-      balance: repo.balanceOf(account.id, asOf),
-    }));
+  /**
+   * Per-currency totals for the Accounts screen and Home.
+   *
+   * A credit line also reports what is left to spend. buildspec.md §10 keeps the limit out of the
+   * balance itself — it is never summed with journal entries, and §12 excludes it from spendable
+   * money — so it travels alongside rather than inside.
+   */
+  function accountBalances(options: { asOf?: Instant; includeArchived?: boolean } = {}) {
+    return repo
+      .listAccounts(options.includeArchived ? { includeArchived: true } : {})
+      .map((account) => {
+        const balance = repo.balanceOf(account.id, options.asOf);
+        return {
+          account,
+          balance,
+          available: availableCredit(account, balance),
+          utilisation: creditUtilisation(account, balance),
+        };
+      });
   }
 
   /**
@@ -561,7 +622,7 @@ export function createFinanceService(options: FinanceServiceOptions) {
     const liquid = new Map<string, Money>();
     const owed = new Map<string, Money>();
 
-    for (const { account, balance } of accountBalances(asOf)) {
+    for (const { account, balance } of accountBalances(asOf === undefined ? {} : { asOf })) {
       if (account.kind === AccountKind.LIABILITY) {
         const running = owed.get(account.currency.code) ?? money(account.currency, 0n);
         owed.set(account.currency.code, money(account.currency, running.minor + balance.minor));
@@ -628,7 +689,10 @@ export function createFinanceService(options: FinanceServiceOptions) {
     seedDefaultCategories,
     listCategories,
     createAccount,
+    updateAccount,
     archiveAccount,
+    unarchiveAccount,
+    accountUsage,
     listAccounts: repo.listAccounts,
     findAccount: repo.findAccount,
     setOpeningBalance,

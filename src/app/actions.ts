@@ -86,11 +86,14 @@ export async function createAccountAction(
 
   try {
     const currency = requireCurrency(String(formData.get("currency") ?? "LKR"));
+    const limitText = String(formData.get("creditLimit") ?? "").trim();
     const account = service.createAccount({
       name: String(formData.get("name") ?? ""),
       type: String(formData.get("type") ?? AccountType.BANK) as AccountType,
       currency,
       institution: emptyToUndefined(formData.get("institution")),
+      // buildspec.md §10: a limit is recorded beside the account, never as a balance.
+      ...(limitText.length > 0 ? { creditLimit: parseMajorUnits(currency, limitText) } : {}),
     });
 
     /*
