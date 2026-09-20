@@ -5,7 +5,7 @@ import { createAgent, readAgentEndpoint, readPermissions } from "../../agent/age
 import { requireDb, requireService } from "../../server/runtime.ts";
 import { accessState } from "../../server/session.ts";
 import { Button } from "../../ui/form.tsx";
-import { Badge, Card, InfoNote, PageHeader, Shell } from "../../ui/primitives.tsx";
+import { Badge, Card, Columns, InfoNote, PageHeader, Shell, Stack } from "../../ui/primitives.tsx";
 import { newChatAction, setPermissionsAction } from "./actions.ts";
 import type { ChatMessageData, ProposalData } from "./chat.tsx";
 import { Chat } from "./chat.tsx";
@@ -79,44 +79,64 @@ export default async function AssistantPage() {
         </InfoNote>
       ) : null}
 
-      <Card>
-        <details>
-          <summary style={{ cursor: "pointer", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", minHeight: "32px" }}>
-            <span style={{ fontWeight: 600 }}>Permissions</span>
-            <Badge tone={permissions.mode === "assist" ? "primary" : "neutral"}>
-              {permissions.mode === "assist" ? "Can draft changes" : "Read-only"}
-            </Badge>
-            {permissions.allowDelete ? <Badge tone="warning">May draft deletions</Badge> : null}
-          </summary>
-          <form action={setPermissionsAction} style={{ display: "grid", gap: "var(--space-3)", marginTop: "var(--space-4)" }}>
-            <input type="hidden" name="allowDeletePresent" value="1" />
-            <label style={{ display: "flex", gap: "var(--space-3)", alignItems: "flex-start" }}>
-              <input type="radio" name="mode" value="ask" defaultChecked={permissions.mode === "ask"} style={{ marginTop: "4px" }} />
-              <span><strong>Ask</strong> — answers questions only. It cannot draft anything.</span>
-            </label>
-            <label style={{ display: "flex", gap: "var(--space-3)", alignItems: "flex-start" }}>
-              <input type="radio" name="mode" value="assist" defaultChecked={permissions.mode === "assist"} style={{ marginTop: "4px" }} />
-              <span><strong>Assist</strong> — may also draft transactions and transfers. Each one waits for your Confirm.</span>
-            </label>
-            <label style={{ display: "flex", gap: "var(--space-3)", alignItems: "flex-start" }}>
-              <input type="checkbox" name="allowDelete" defaultChecked={permissions.allowDelete} style={{ marginTop: "4px" }} />
-              <span>Let it draft moving a transaction to Trash. Still needs your Confirm, and Trash can be undone.</span>
-            </label>
-            <p style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)", margin: 0 }}>
-              It can never confirm its own drafts, change settings, send anything, or read your raw messages.
-            </p>
-            <div><Button type="submit" variant="secondary">Save permissions</Button></div>
-          </form>
-        </details>
-      </Card>
+      {/*
+        Desktop: the conversation gets the room, with what the assistant may do pinned beside it.
+        On a phone the stacks dissolve and `order` puts Permissions back above the chat.
+      */}
+      <Columns layout="main-aside">
+        <Stack>
+          <Chat
+            sessionId={sessionId}
+            messages={messages}
+            proposals={proposals}
+            suggestions={suggestions}
+            now={Date.now()}
+          />
+        </Stack>
 
-      <Chat
-        sessionId={sessionId}
-        messages={messages}
-        proposals={proposals}
-        suggestions={suggestions}
-        now={Date.now()}
-      />
+        <Stack sticky>
+          <Card order={-1}>
+            <details>
+              <summary style={{ cursor: "pointer", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", minHeight: "32px" }}>
+                <span style={{ fontWeight: 600 }}>Permissions</span>
+                <Badge tone={permissions.mode === "assist" ? "primary" : "neutral"}>
+                  {permissions.mode === "assist" ? "Can draft changes" : "Read-only"}
+                </Badge>
+                {permissions.allowDelete ? <Badge tone="warning">May draft deletions</Badge> : null}
+              </summary>
+              <form action={setPermissionsAction} style={{ display: "grid", gap: "var(--space-3)", marginTop: "var(--space-4)" }}>
+                <input type="hidden" name="allowDeletePresent" value="1" />
+                <label style={{ display: "flex", gap: "var(--space-3)", alignItems: "flex-start" }}>
+                  <input type="radio" name="mode" value="ask" defaultChecked={permissions.mode === "ask"} style={{ marginTop: "4px" }} />
+                  <span><strong>Ask</strong> — answers questions only. It cannot draft anything.</span>
+                </label>
+                <label style={{ display: "flex", gap: "var(--space-3)", alignItems: "flex-start" }}>
+                  <input type="radio" name="mode" value="assist" defaultChecked={permissions.mode === "assist"} style={{ marginTop: "4px" }} />
+                  <span><strong>Assist</strong> — may also draft transactions and transfers. Each one waits for your Confirm.</span>
+                </label>
+                <label style={{ display: "flex", gap: "var(--space-3)", alignItems: "flex-start" }}>
+                  <input type="checkbox" name="allowDelete" defaultChecked={permissions.allowDelete} style={{ marginTop: "4px" }} />
+                  <span>Let it draft moving a transaction to Trash. Still needs your Confirm, and Trash can be undone.</span>
+                </label>
+                <p style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)", margin: 0 }}>
+                  It can never confirm its own drafts, change settings, send anything, or read your raw messages.
+                </p>
+                <div><Button type="submit" variant="secondary">Save permissions</Button></div>
+              </form>
+            </details>
+          </Card>
+
+          <div className="wide-only">
+            <Card title="How it works">
+              <ul style={{ margin: 0, paddingLeft: "1.1em", display: "grid", gap: "var(--space-2)", fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
+                <li>Balances, spending and recent transactions are answered straight from your ledger, instantly, with no model involved.</li>
+                <li>Anything freer goes to {endpoint ? <strong>{endpoint.model}</strong> : "the model you choose in Settings"}, which can look things up but never does the sums itself.</li>
+                <li>It can only <em>draft</em> a change. Nothing is recorded until you press Confirm on the card, and typing &ldquo;yes&rdquo; is not confirming.</li>
+              </ul>
+            </Card>
+          </div>
+        </Stack>
+      </Columns>
     </Shell>
   );
 }

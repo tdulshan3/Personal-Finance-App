@@ -625,7 +625,13 @@ export function createFinanceService(options: FinanceServiceOptions) {
   /* Queries                                                                                    */
   /* ---------------------------------------------------------------------------------------- */
 
-  /** buildspec.md §16: typed filters, stable sort, bounded page size (default 50, max 200). */
+  /**
+   * buildspec.md §16: typed filters, stable sort, bounded page size (default 50, max 200).
+   *
+   * Date-only records on the same day share one `occurred_at`, so the tie is broken by when they
+   * were entered — newest first, like the rest of the list — and only then by id, which is random
+   * and exists here purely to keep paging stable.
+   */
   function searchTransactions(filters: {
     from?: LocalDate | undefined;
     to?: LocalDate | undefined;
@@ -681,7 +687,7 @@ export function createFinanceService(options: FinanceServiceOptions) {
            FROM transactions t
            JOIN transaction_revisions r ON r.transaction_id = t.id
           WHERE ${where.join(" AND ")}
-          ORDER BY r.occurred_at DESC, t.id DESC
+          ORDER BY r.occurred_at DESC, t.created_at DESC, t.id DESC
           LIMIT ? OFFSET ?`,
       )
       .all(...params, limit, offset) as Record<string, unknown>[];

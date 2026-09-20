@@ -4,6 +4,24 @@
  * future retheme carry through.
  */
 
+/* A column whose composer can sit at the foot of the window on a desktop, however short the thread. */
+.chat {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+@media (min-width: 1024px) {
+  .chat {
+    min-height: calc(100dvh - 210px);
+  }
+
+  .chat > .composer {
+    margin-top: auto;
+    padding-top: var(--space-4);
+  }
+}
+
 .thread {
   display: flex;
   flex-direction: column;
