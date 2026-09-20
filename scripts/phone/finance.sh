@@ -52,9 +52,23 @@ DATA_DIR="${PFA_DATA_DIR:-$HOME/finance/data}"
 LOG_DIR="${PFA_LOG_DIR:-$HOME/finance/logs}"
 PORT="${PFA_PORT:-8090}"
 
-# Loopback by default. ADR 0007: the session cookie authenticates the browser, but the transport is
-# plain HTTP, so the passphrase would cross the network in the clear. Binding to the LAN is an
-# explicit choice, not the default.
+# Loopback by default.
+#
+# ADR 0007: the session cookie authenticates the browser, but the transport is plain HTTP, so the
+# passphrase -- which is also the database key -- would cross the network in the clear on every
+# unlock. Anyone able to see LAN traffic could read it.
+#
+# Two ways to reach the ledger from another machine:
+#
+#   1. An SSH tunnel. Encrypted, exposes nothing, and sshd is already running on 8022:
+#        ssh -N -L 8090:127.0.0.1:8090 -p 8022 <phone-ip>
+#      then open http://127.0.0.1:8090 on the laptop.
+#
+#   2. Bind the LAN, the way every other service on this phone already works, accepting the
+#      cleartext passphrase:
+#        PFA_HOST=0.0.0.0 sh finance.sh
+#
+# The second is a deliberate trade, not a default.
 HOST="${PFA_HOST:-127.0.0.1}"
 
 die() { printf '%s\n' "$*" >&2; exit 1; }
