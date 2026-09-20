@@ -110,6 +110,14 @@ export const FIELD_LIMITS = Object.freeze({
 /* The schema                                                                                      */
 /* --------------------------------------------------------------------------------------------- */
 
+/*
+ * A note on `description`, measured against this deployment's llama.cpp build: when a schema
+ * arrives through `response_format.json_schema`, llama.cpp compiles it to a GBNF grammar and does
+ * not put any of it into the prompt — rewriting every description here left the reported
+ * `prompt_tokens` unchanged at 218 and the model's answer byte-identical. So descriptions steer
+ * nothing on this host. They are kept because they document the contract for a reader, and because
+ * hosts that do surface the schema (OpenAI, and Ollama's `format`) will use them.
+ */
 function nullableString(maxLength: number, description: string): JsonSchema {
   return { type: ["string", "null"], maxLength, description };
 }
@@ -152,11 +160,16 @@ const EVENT_SCHEMA: JsonSchema = {
     event_type: {
       type: "string",
       enum: EVENT_TYPES,
-      description: "What the message proves happened. A declined or OTP message is not spending.",
+      description:
+        "What the message proves happened. posted_expense = money already left the account; " +
+        "posted_income = money already arrived; pending_payment = will be debited later; " +
+        "bill = an amount due; failed = declined, no money moved; otp = a one-time code; " +
+        "balance_notice = only a balance was stated.",
     },
     amount_text: nullableString(
       FIELD_LIMITS.amountText,
-      "The transaction amount exactly as written, never a balance or a limit",
+      "The transaction amount as digits only, copied from the message, e.g. '3,450.00'. " +
+        "No currency code, no words. Never a balance or a limit.",
     ),
     /*
      * `null` is listed inside the enum rather than relying on `type` alone: llama.cpp's
@@ -168,14 +181,26 @@ const EVENT_SCHEMA: JsonSchema = {
       enum: [...SCHEMA_CURRENCY_CODES, null],
       description: "ISO 4217 code for the amount",
     },
-    merchant_text: nullableString(FIELD_LIMITS.merchantText, "Merchant or counterparty exactly as written"),
+    merchant_text: nullableString(
+      FIELD_LIMITS.merchantText,
+      "Merchant or counterparty name only, copied from the message, e.g. 'KEELLS SUPER'",
+    ),
     account_suffix: nullableString(
       FIELD_LIMITS.accountSuffix,
-      "Only the masked trailing digits shown in the message, never a full number",
+      "Only the masked trailing digits shown in the message, e.g. '1234'. No asterisks, never a full number.",
     ),
-    occurred_at_text: nullableString(FIELD_LIMITS.occurredAtText, "Date or date-time exactly as written"),
-    reference_text: nullableString(FIELD_LIMITS.referenceText, "Reference or transaction id exactly as written"),
-    balance_text: nullableString(FIELD_LIMITS.balanceText, "Balance amount exactly as written"),
+    occurred_at_text: nullableString(
+      FIELD_LIMITS.occurredAtText,
+      "The date exactly as written, e.g. '20/09/2026'. No surrounding words.",
+    ),
+    reference_text: nullableString(
+      FIELD_LIMITS.referenceText,
+      "The reference or transaction id only, e.g. 'RFD4482190'. No surrounding words.",
+    ),
+    balance_text: nullableString(
+      FIELD_LIMITS.balanceText,
+      "The balance as digits only, e.g. '52,340.20'. No currency code, no words.",
+    ),
     balance_type: {
       type: ["string", "null"],
       enum: [...BALANCE_TYPES, null],

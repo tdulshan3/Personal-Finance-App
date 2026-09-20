@@ -92,7 +92,16 @@ export const EXTRACTION_DEFAULTS = Object.freeze({
   modelLocked: true,
   numCtx: 4096,
   temperature: 0,
-  numPredict: 512,
+  /*
+   * buildspec.md §7.2's example config says `num_predict: 512`. Measured against the owner's real
+   * endpoint, that is too small for this schema: 4 of the 14 labelled fixtures hit
+   * `finish_reason: "length"` mid-JSON and came back unparseable. Raising the budget took schema
+   * validity from 10/14 to 14/14 and event-type accuracy from 7/14 to 11/14 — the truncation was
+   * doing more damage than the model's judgement was. §7.3 is explicit that truncation must not
+   * silently lose amounts, so the ceiling belongs above the worst observed output (930 tokens),
+   * not at the spec's illustrative default. See docs/extraction-eval.md.
+   */
+  numPredict: 1024,
   maxConcurrency: 1,
   timeoutSeconds: 120,
   disableThinking: true,
@@ -140,6 +149,15 @@ export function assertExtractionRoleConfig(config: ExtractionRoleConfig): void {
   }
 }
 
+/**
+ * Validates both roles as one settings document.
+ *
+ * The two roles may point at the same host and even the same model id — buildspec.md §18 expects
+ * one physical host to be shared — so that is not an error here. What buildspec.md §1.2 forbids is
+ * the chat model *silently* becoming the extractor, and that is prevented at call time instead:
+ * `createExtractionClient` verifies the locked id before its first call and refuses any answer the
+ * server attributes to a different model.
+ */
 export function assertModelRolesConfig(config: ModelRolesConfig): void {
   assertExtractionRoleConfig(config.extraction);
   if (!isProviderKind(config.agent.provider)) {
@@ -148,13 +166,8 @@ export function assertModelRolesConfig(config: ModelRolesConfig): void {
   if (!(Object.values(AgentMode) as string[]).includes(config.agent.mode)) {
     throw validationError(`Unknown agent mode '${config.agent.mode}'`, { role: "agent" });
   }
-  if (config.agent.model !== null && config.agent.model === config.extraction.model) {
-    /*
-     * Not fatal — the owner may genuinely have only one model on one host — but it must be a
-     * deliberate choice, because buildspec.md §1.2 forbids the chat model *silently* becoming the
-     * extractor. The extraction client still verifies its own model id on every call.
-     */
-    return;
+  if (config.agent.baseUrl.trim().length === 0) {
+    throw validationError("The agent role needs its own base URL (buildspec §1.3)", { role: "agent" });
   }
 }
 
