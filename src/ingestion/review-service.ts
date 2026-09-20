@@ -6,6 +6,7 @@ import { notFound, validationError } from "../core/domain/errors.ts";
 import { money, parseMajorUnits, requireCurrency } from "../core/domain/money.ts";
 import type { Money } from "../core/domain/money.ts";
 import { addDays, dateOnlyTime, localDateOf } from "../core/domain/time.ts";
+import { createBalanceCheckService } from "../core/services/balance-check.ts";
 import type { FinanceService } from "../core/services/finance-service.ts";
 import { POSTABLE_KINDS } from "./processing.ts";
 
@@ -46,6 +47,12 @@ export type ReviewCard = {
    * transaction). The bank's message says which account paid; the biller's says what it was for.
    */
   readonly pairedWith: { eventId: string; sender: string; sourceText: string | null } | null;
+  /**
+   * The balance the bank's message reported, and what the ledger would show for the suggested
+   * account once this is recorded. When the two agree, nothing is missing from the books up to
+   * this message; when they differ, something was never recorded (or was recorded twice).
+   */
+  readonly balanceCheck: { reported: Money; projected: Money; accountName: string } | null;
 };
 
 /** How far apart the two messages of one payment may arrive. Billers can lag the bank by minutes. */
@@ -82,6 +89,21 @@ export function createReviewService(deps: { db: Db; service: FinanceService }) {
       )
       .get(merchant) as Record<string, unknown> | undefined;
     return row ? asText(row.category_id, "category_id") : null;
+  }
+
+  function projectBalance(accountId: string | null, kind: string, amount: Money | null, balanceText: string | null) {
+    if (!accountId || !amount || !balanceText) return null;
+    const account = service.findAccount(accountId);
+    // A card's SMS reports credit left, not the balance; the Accounts screen compares that.
+    if (!account || account.kind !== "asset" || account.currency.code !== amount.currency.code) return null;
+    try {
+      const reported = parseMajorUnits(account.currency, balanceText);
+      const now = service.balanceOf(account.id);
+      const delta = kind === "posted_income" || kind === "refund" ? amount.minor : -amount.minor;
+      return { reported, projected: money(account.currency, now.minor + delta), accountName: account.name };
+    } catch {
+      return null;
+    }
   }
 
   function findPossibleDuplicate(amount: Money | null, occurredOn: string | null) {
@@ -163,6 +185,7 @@ export function createReviewService(deps: { db: Db; service: FinanceService }) {
       const candidate = JSON.parse(asText(row.candidate_json, "candidate_json")) as {
         occurredOn?: string | null;
         flags?: string[];
+        balanceText?: string | null;
       };
       const currencyCode = asOptionalText(row.currency, "currency");
       const amount =
@@ -193,6 +216,7 @@ export function createReviewService(deps: { db: Db; service: FinanceService }) {
         suggestedCategoryId: suggestCategory(merchant),
         possibleDuplicate: findPossibleDuplicate(amount, occurredOn),
         pairedWith: null,
+        balanceCheck: projectBalance(suggestAccount(hint), kind, amount, candidate.balanceText ?? null),
       };
     });
     return pairUp(cards, keepApart);
@@ -236,7 +260,10 @@ export function createReviewService(deps: { db: Db; service: FinanceService }) {
     pairedEventId?: string | undefined;
   }): { transactionId: string } {
     const event = db
-      .prepare("SELECT id, status, account_hint FROM source_events WHERE id = ?")
+      .prepare(
+        `SELECT e.id, e.status, e.account_hint, e.source_id, e.candidate_json, m.received_at
+           FROM source_events e JOIN source_messages m ON m.id = e.source_id WHERE e.id = ?`,
+      )
       .get(input.eventId) as Record<string, unknown> | undefined;
     if (!event) throw notFound("Review item", input.eventId);
     if (asText(event.status, "status") !== "needs_review") {
@@ -278,6 +305,22 @@ export function createReviewService(deps: { db: Db; service: FinanceService }) {
       ).run(newId("tsrc"), result.transactionId, input.eventId, result.actionId, service.clock.now());
 
       resolve(input.eventId, "accepted", result.actionId);
+
+      // Keep what the bank said the balance was. It changes nothing; it is what the books are
+      // checked against afterwards (buildspec.md §17.1: observations are appended, never applied).
+      try {
+        const reportedText = (JSON.parse(asText(event.candidate_json, "candidate_json")) as { balanceText?: string | null }).balanceText;
+        if (reportedText) {
+          createBalanceCheckService({ db, service }).recordObservation({
+            accountId: input.accountId,
+            reported: parseMajorUnits(account.currency, reportedText),
+            observedAt: asNumber(event.received_at, "received_at"),
+            sourceId: asText(event.source_id, "source_id"),
+          });
+        }
+      } catch {
+        // An unreadable balance figure is not a reason to refuse the transaction.
+      }
 
       // One expense, two pieces of evidence. The receipt is linked and closed, never posted.
       if (input.pairedEventId) {

@@ -74,6 +74,16 @@ export default async function ReviewPage({
     suggestedCategoryId: card.suggestedCategoryId,
     possibleDuplicate: card.possibleDuplicate,
     pairedWith: card.pairedWith,
+    balanceCheck: card.balanceCheck
+      ? {
+          accountName: card.balanceCheck.accountName,
+          reported: formatMoney(card.balanceCheck.reported),
+          projected: formatMoney(card.balanceCheck.projected),
+          difference: card.balanceCheck.reported.minor === card.balanceCheck.projected.minor
+            ? null
+            : formatMoney({ currency: card.balanceCheck.reported.currency, minor: card.balanceCheck.reported.minor - card.balanceCheck.projected.minor }, { signed: true }),
+        }
+      : null,
     splitHref: card.pairedWith ? `/review?apart=${[...apart, card.eventId, card.pairedWith.eventId].join(",")}` : null,
   });
 

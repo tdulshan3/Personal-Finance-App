@@ -28,6 +28,7 @@ export type ReviewCardData = {
   suggestedAccountId: string | null;
   suggestedCategoryId: string | null;
   possibleDuplicate: { transactionId: string; label: string } | null;
+  balanceCheck: { accountName: string; reported: string; projected: string; difference: string | null } | null;
   pairedWith: { eventId: string; sender: string; sourceText: string | null } | null;
   /** Reloads the inbox with this pairing undone. */
   splitHref: string | null;
@@ -120,6 +121,25 @@ export function ReviewCard({
           <Link href={`/transactions/${data.possibleDuplicate.transactionId}`}>{data.possibleDuplicate.label}</Link>
           . If it is the same payment, ignore this one.
         </span>
+      ) : null}
+
+      {data.balanceCheck ? (
+        <div className={data.balanceCheck.difference ? "note note-danger" : "note note-info"} role="status">
+          <div className="note-body">
+            {data.balanceCheck.difference ? (
+              <>
+                <strong>Does not balance.</strong> Your bank says {data.balanceCheck.reported} is left in {data.balanceCheck.accountName};
+                after recording this your books would say {data.balanceCheck.projected} ({data.balanceCheck.difference}). Something
+                earlier was probably never recorded. You can still accept this, then fix the gap on Accounts.
+              </>
+            ) : (
+              <>
+                <strong>Balanced.</strong> After recording this, {data.balanceCheck.accountName} will show {data.balanceCheck.projected},
+                exactly what your bank reports.
+              </>
+            )}
+          </div>
+        </div>
       ) : null}
 
       {data.postable ? (
