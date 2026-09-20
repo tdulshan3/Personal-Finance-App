@@ -22,7 +22,7 @@ import { EventType as Event } from "./schema.ts";
  *     a hostile or malformed message cannot make the parser hang (§7.1, §20).
  */
 
-export const TEMPLATE_ENGINE_VERSION = "rules-v1";
+export const TEMPLATE_ENGINE_VERSION = "rules-v2";
 
 /* -------------------------------------------------------------------------------------------- */
 /* Field patterns                                                                                 */
@@ -87,7 +87,7 @@ const CREDIT_LIMIT_LEAD = /\b(credit limit|available limit|limit is)\b/i;
 
 /** `at KEELLS SUPER`, `to Demo Internet`, `from ODEL`. Bounded to 48 characters. */
 const MERCHANT_LEAD =
-  /\b(?:at|to|from|for)\s+([A-Z][A-Za-z0-9&'. \-]{1,47}?)(?=\s+(?:using|on|via|with|card|acct|a\/c|ref|\.|,)|[.,]|$)/;
+  /\b(?:at|to|from|for)\s+([A-Z][A-Za-z0-9&'. \-]{1,47}?)(?=\s+(?:using|on|via|with|card|acct|account|a\/c|ref|no|number|was|is|has|successful(?:ly)?|\.|,)|[.,]|$)/;
 
 /** `Ref K928`, `Reference: 482913`, `Txn ID 12345`. */
 const REFERENCE =
@@ -180,6 +180,10 @@ const RULES: readonly Rule[] = Object.freeze([
     type: Event.POSTED_EXPENSE,
     any: [
       /\b(purchase of|debited|debit of|spent|withdrawn|withdrawal|payment of|charged)\b/i,
+      // A biller's own receipt: "Recharge of Rs.50.00 successful", "Reload ... completed". Tied to
+      // a success word so "Recharge Rs.100 and get 2GB" stays a promotion, not spending.
+      /\b(?:recharge|reload|top-?up|bill payment)\b[\s\S]{0,60}?\b(?:successful(?:ly)?|success|completed|received|done)\b/i,
+      /\b(?:successful(?:ly)?|completed|received)\b[\s\S]{0,60}?\b(?:recharge|reload|top-?up|bill payment)\b/i,
       /\b(?:you |has been |was )?paid\b/i,
       /\bpos\b/i,
       // ගෙවා / ගෙවීම = paid; අඩු කර = deducted.
@@ -236,6 +240,9 @@ const MONEY_EVENTS: readonly EventType[] = Object.freeze([
   Event.REFUND,
 ]);
 
+/** Currency written after the figure, as some billers do: `50.00rs`, `1,250.00 LKR`. */
+const AMOUNT_CURRENCY_LAST = /(?<![\w.,])([0-9][0-9,]{0,14}(?:\.[0-9]{1,2})?)\s?(LKR|RS\.?|RUPEES)(?![A-Za-z])/gi;
+
 type AmountHit = { readonly currency: string; readonly amount: string; readonly text: string; readonly index: number };
 
 function collectAmounts(text: string): AmountHit[] {
@@ -251,6 +258,13 @@ function collectAmounts(text: string): AmountHit[] {
     if (!CURRENCIES[code]) continue;
     hits.push({ currency: code, amount, text: match[0], index: match.index ?? 0 });
   }
+  for (const match of text.matchAll(AMOUNT_CURRENCY_LAST)) {
+    const index = match.index ?? 0;
+    // "Rs 50.00 Rs" must not count twice: skip anything a currency-first match already covers.
+    if (hits.some((hit) => index < hit.index + hit.text.length && hit.index < index + match[0].length)) continue;
+    hits.push({ currency: "LKR", amount: match[1] ?? "", text: match[0], index });
+  }
+  hits.sort((a, b) => a.index - b.index);
   return hits;
 }
 
@@ -386,6 +400,10 @@ export function applyTemplates(sourceText: string): TemplateResult {
  */
 export function needsModel(result: TemplateResult): boolean {
   if (result.complete) return false;
+  // A receipt that simply does not state its date ("Recharge of Rs.50.00 successful") is not
+  // unclear: the moment it arrived is the date. Sending it to the model would only delay it, and
+  // with the model host off it would never reach review at all.
+  if (result.missing.length === 1 && result.missing[0] === "occurred_at_text") return false;
   return !(
     result.eventType === Event.OTP ||
     result.eventType === Event.PROMOTION ||

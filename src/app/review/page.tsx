@@ -31,14 +31,22 @@ const KIND_LABELS: Record<string, string> = {
  * model takes the remainder when it is reachable, and everything that could touch money stops here
  * for a decision.
  */
-export default async function ReviewPage() {
+export default async function ReviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const access = await accessState();
   if (access.kind === "needs-setup") redirect("/setup");
   if (access.kind !== "ready") redirect("/unlock");
 
   const service = requireService();
   const review = createReviewService({ db: requireDb(), service });
-  const cards = review.listOpen(40);
+  // `?apart=evt_a,evt_b`: pairings the owner said were wrong. In the URL, so it needs no storage
+  // and disappears by itself once those messages are dealt with.
+  const params = await searchParams;
+  const apart = new Set((typeof params.apart === "string" ? params.apart : "").split(",").filter(Boolean).slice(0, 40));
+  const cards = review.listOpen(40, apart);
   const counts = currentProcessor()?.counts() ?? { staged: 0, waitingForModel: 0, openReviews: cards.length };
   const status = backgroundStatus();
   const today = localDateOf(Date.now(), service.zone);
@@ -65,6 +73,8 @@ export default async function ReviewPage() {
     suggestedAccountId: card.suggestedAccountId,
     suggestedCategoryId: card.suggestedCategoryId,
     possibleDuplicate: card.possibleDuplicate,
+    pairedWith: card.pairedWith,
+    splitHref: card.pairedWith ? `/review?apart=${[...apart, card.eventId, card.pairedWith.eventId].join(",")}` : null,
   });
 
   return (
