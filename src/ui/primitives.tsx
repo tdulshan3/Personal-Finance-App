@@ -33,6 +33,7 @@ export function Card({
   tone = "solid",
   style,
   footer,
+  order,
 }: {
   children: ReactNode;
   title?: ReactNode;
@@ -42,9 +43,15 @@ export function Card({
   /** Applied to the rounded container itself. */
   style?: CSSProperties;
   footer?: ReactNode | undefined;
+  /**
+   * Where this section sits when `Columns` collapses to one column on a phone. The two stacks
+   * dissolve there and their cards interleave by `order`, so a card that lives in the desktop
+   * sidebar column can still come second on a phone instead of last. Lower comes first.
+   */
+  order?: number | undefined;
 }) {
   return (
-    <section className="card-section">
+    <section className="card-section" style={order === undefined ? undefined : { order }}>
       {title || action ? (
         <header className="section-header">
           {typeof title === "string" ? <h2 className="section-title">{title}</h2> : title}
@@ -168,8 +175,51 @@ export function PageHeader({
   );
 }
 
-export function Shell({ children }: { children: ReactNode }) {
-  return <main className="shell">{children}</main>;
+/**
+ * The page frame.
+ *
+ * On a phone every page is one column and `width` changes nothing. From 1024 px up the app has a
+ * sidebar and room to spare: `wide` (the default) lets a page spread into `Columns` (which split
+ * from 1200 px), while `narrow` keeps a single form or a short read at a comfortable measure
+ * instead of stretching it.
+ */
+export function Shell({
+  children,
+  width = "wide",
+}: {
+  children: ReactNode;
+  width?: "wide" | "narrow" | undefined;
+}) {
+  return <main className={cx("shell", width === "narrow" && "shell-narrow")}>{children}</main>;
+}
+
+/**
+ * Side-by-side regions on a desktop, one column on a phone.
+ *
+ * Children should be `Stack`s. `main-aside` gives the first stack the room and the second a
+ * sidebar's width; `aside-main` is the mirror image; `halves` and `thirds` split evenly. Below
+ * 1200 px the stacks dissolve (`display: contents`), so their cards flow as one list in DOM order —
+ * adjusted by `Card`'s `order` where the phone wants a different sequence.
+ */
+export function Columns({
+  children,
+  layout = "main-aside",
+}: {
+  children: ReactNode;
+  layout?: "main-aside" | "aside-main" | "halves" | "thirds" | undefined;
+}) {
+  return <div className={cx("columns", `columns-${layout}`)}>{children}</div>;
+}
+
+/** One column inside `Columns`. `sticky` keeps a short column in view beside a long one. */
+export function Stack({
+  children,
+  sticky = false,
+}: {
+  children: ReactNode;
+  sticky?: boolean | undefined;
+}) {
+  return <div className={cx("stack", sticky && "stack-sticky")}>{children}</div>;
 }
 
 /** The icon means an error is never signalled by red alone. */

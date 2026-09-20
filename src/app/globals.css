@@ -1263,12 +1263,338 @@ input[type="datetime-local"].control {
   outline-offset: -3px;
 }
 
+/* ── Columns: one list on a phone, regions side by side on a desktop ─────────────────────────── */
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+  min-width: 0;
+}
+
+/*
+ * On a phone the stacks dissolve, so every card is a direct item of `.columns` and `order` can move
+ * a card from the second stack up between cards of the first.
+ */
+.columns > .stack {
+  display: contents;
+}
+
+.stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 28px;
+  min-width: 0;
+}
+
+/* ── Live updates: silent while healthy, visible when the link is down ───────────────────────── */
+
+.live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-footnote);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  flex: none;
+}
+
+.live-status[data-state="live"] .live-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 60%, transparent);
+  animation: live-pulse 2.4s ease-out infinite;
+}
+
+.live-status[data-state="offline"] .live-dot {
+  background: var(--warning);
+}
+
+@keyframes live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 55%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
+/* A phone has no sidebar to carry the indicator, so a lost link surfaces as a pill above the bar. */
+.live-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--tabbar-height) + var(--tabbar-offset) + 12px);
+  transform: translateX(-50%);
+  z-index: 25;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: var(--font-footnote);
+  font-weight: 600;
+  box-shadow:
+    0 0 0 var(--hairline) var(--glass-rim),
+    var(--shadow-float);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.live-toast .live-dot {
+  background: var(--warning);
+}
+
+/* ── Sidebar: the desktop's navigation. Hidden until there is room for it. ───────────────────── */
+
+/* `desktop-only` follows the sidebar (1024 px); `wide-only` follows the columns (1200 px). */
+.sidebar,
+.desktop-only,
+.wide-only {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .shell {
+    max-width: 760px;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --sidebar-width: 272px;
+    /* No tab bar to clear: anything stuck to the bottom just keeps a comfortable margin. */
+    --tabbar-clearance: 24px;
+    --large-title-size: var(--font-xl);
+  }
+
+  body.has-nav {
+    padding-left: var(--sidebar-width);
+    padding-bottom: 0;
+  }
+
+  .tabbar-wrap,
+  .live-toast,
+  .quick-links,
+  .phone-only {
+    display: none;
+  }
+
+  .desktop-only {
+    display: revert;
+  }
+
+  .sidebar {
+    --glass-solid: var(--surface);
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    width: var(--sidebar-width);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    padding: 28px 16px 20px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: var(--sidebar-bg, var(--glass-bg));
+    box-shadow: inset calc(-1 * var(--hairline)) 0 0 0 var(--border);
+    -webkit-backdrop-filter: saturate(180%) blur(30px);
+    backdrop-filter: saturate(180%) blur(30px);
+  }
+
+  .sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 10px;
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    text-decoration: none;
+  }
+
+  .sidebar-brand:hover {
+    text-decoration: none;
+  }
+
+  .sidebar-mark {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    background: var(--primary-fill);
+    color: var(--on-primary-fill);
+    box-shadow: var(--shadow-card);
+    flex: none;
+  }
+
+  .sidebar-group {
+    display: grid;
+    gap: 2px;
+  }
+
+  .sidebar-label {
+    padding: 0 12px 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: 12px;
+    color: var(--text);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .sidebar-item:hover {
+    text-decoration: none;
+    background: var(--fill, var(--surface-sunken));
+  }
+
+  .sidebar-item > svg {
+    color: var(--primary);
+    flex: none;
+  }
+
+  .sidebar-item[aria-current="page"] {
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-weight: 600;
+  }
+
+  .sidebar-item:focus-visible {
+    outline-offset: -3px;
+  }
+
+  .sidebar-count {
+    margin-left: auto;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 7px;
+    border-radius: var(--radius-pill);
+    display: inline-grid;
+    place-items: center;
+    background: var(--primary-fill);
+    color: var(--on-primary-fill);
+    font-size: 0.75rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sidebar-footer {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-4) 8px 0;
+    border-top: var(--hairline) solid var(--border);
+  }
+
+  /* The page itself: wide enough to organise, never so wide that a row of text runs on. */
+  .shell {
+    --shell-padding: 40px;
+    max-width: 1240px;
+    padding: 44px var(--shell-padding) 72px;
+    gap: 32px;
+  }
+
+  .shell-narrow {
+    max-width: 760px;
+  }
+
+  .columns,
+  .stack {
+    gap: 32px;
+  }
+
+  /* The pre-unlock screens have no sidebar; centre their single card in the window instead. */
+  body:not(.has-nav) .shell {
+    min-height: 100dvh;
+    align-content: center;
+    max-width: 560px;
+  }
+}
+
+/*
+ * Columns start later than the sidebar. At 1024 px the sidebar leaves about 670 px of page, and
+ * splitting that would squeeze the main column to the width of a small phone; until 1200 px the
+ * page keeps one comfortable column (and therefore the phone's card order) beside the sidebar.
+ */
+@media (min-width: 1200px) {
+  .columns > .stack {
+    display: grid;
+    align-content: start;
+  }
+
+  .columns-main-aside {
+    grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
+  }
+
+  .columns-aside-main {
+    grid-template-columns: minmax(320px, 1fr) minmax(0, 1.7fr);
+  }
+
+  .columns-halves {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .columns-thirds {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  /* Keeps a short column (a form, a summary) in view while the long one beside it scrolls. */
+  .stack-sticky {
+    position: sticky;
+    top: 32px;
+  }
+
+  .wide-only {
+    display: revert;
+  }
+}
+
+@media (min-width: 1440px) {
+  .shell {
+    max-width: 1320px;
+  }
+
+  .shell-narrow {
+    max-width: 800px;
+  }
+}
+
 /* ── Fallbacks: these stay last so they win over the glass rules above ───────────────────────── */
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .glass,
   .card-glass,
-  .tabbar {
+  .tabbar,
+  .sidebar {
     background: var(--glass-solid, var(--surface));
     border-color: var(--border);
   }
@@ -1277,7 +1603,8 @@ input[type="datetime-local"].control {
 @media (prefers-reduced-transparency: reduce) {
   .glass,
   .card-glass,
-  .tabbar {
+  .tabbar,
+  .sidebar {
     background: var(--glass-solid, var(--surface));
     border-color: var(--border);
     -webkit-backdrop-filter: none;
@@ -1289,7 +1616,7 @@ input[type="datetime-local"].control {
   }
 }
 
-:root[data-reduce-transparency="true"] :is(.glass, .card-glass, .tabbar) {
+:root[data-reduce-transparency="true"] :is(.glass, .card-glass, .tabbar, .sidebar) {
   background: var(--glass-solid, var(--surface));
   border-color: var(--border);
   -webkit-backdrop-filter: none;
@@ -1313,7 +1640,8 @@ input[type="datetime-local"].control {
 
   .glass,
   .card-glass,
-  .tabbar {
+  .tabbar,
+  .sidebar {
     background: var(--glass-solid, var(--surface));
     border-color: var(--text-secondary);
     -webkit-backdrop-filter: none;

@@ -33,7 +33,7 @@ export function NotBuiltYet({
   useInstead?: { href: string; label: string };
 }) {
   return (
-    <Shell>
+    <Shell width="narrow">
       <PageHeader
         title={title}
         subtitle={`Not built yet — milestone ${milestone}`}
