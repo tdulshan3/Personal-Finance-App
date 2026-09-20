@@ -120,6 +120,11 @@ export function Chat({
   const [state, send, pending] = useActionState<ChatState, FormData>(sendMessageAction, {});
   const [draft, setDraft] = useState("");
   const [sentText, setSentText] = useState<string | null>(null);
+  // How many of the owner's messages the server had shown when this one was sent. A live refresh
+  // can deliver the stored copy mid-turn; once it has, the optimistic bubble must step aside.
+  const [ownerCountAtSend, setOwnerCountAtSend] = useState(0);
+  const ownerCount = messages.filter((message) => message.role === "owner").length;
+  const optimisticText = sentText !== null && ownerCount === ownerCountAtSend ? sentText : null;
   const formRef = useRef<HTMLFormElement>(null);
   const proposalCount = Object.keys(proposals).length;
 
@@ -143,6 +148,7 @@ export function Chat({
       return;
     }
     setSentText(text);
+    setOwnerCountAtSend(ownerCount);
     // Clear after the browser has collected the form data for this submit.
     setTimeout(() => setDraft(""), 0);
   }
@@ -167,9 +173,11 @@ export function Chat({
   }
 
   const isEmpty = messages.length === 0 && !sentText;
+  // Mid-turn the stored transcript ends with the owner's message: the reply is still being made.
+  const awaitingReply = pending || (sentText !== null && messages.at(-1)?.role === "owner");
 
   return (
-    <div>
+    <div className={styles.chat}>
       {isEmpty ? (
         <div className={styles.empty}>
           <strong>Ask about your money</strong>
@@ -196,12 +204,12 @@ export function Chat({
               </li>
             ),
           )}
-          {sentText ? (
+          {optimisticText ? (
             <li className={`${styles.row} ${styles.rowOwner}`}>
-              <div className={`${styles.bubble} ${styles.owner}`}>{sentText}</div>
+              <div className={`${styles.bubble} ${styles.owner}`}>{optimisticText}</div>
             </li>
           ) : null}
-          {pending ? (
+          {awaitingReply ? (
             <li className={`${styles.row} ${styles.rowAssistant}`}>
               <div className={`${styles.bubble} ${styles.assistant}`} role="status" aria-label="The assistant is working">
                 <span className={styles.typing}><span /><span /><span /></span>
