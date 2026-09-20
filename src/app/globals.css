@@ -1,0 +1,262 @@
+/*
+ * Design tokens and base styles.
+ *
+ * buildspec.md §13: "Create a calm, rounded, blue, iOS-inspired interface with clear financial
+ * information. Use translucent glass and blur sparingly for navigation, sheets, and a few summary
+ * surfaces. Keep transaction tables and forms readable on mostly solid surfaces."
+ *
+ * The palette is the suggested token table from §13, adjusted only where contrast required it.
+ * No Tailwind: plain CSS custom properties keep the phone-hosted bundle small and give exact
+ * control over the specified values.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* §13 token table — light */
+  --bg: #f3f6fc;
+  --surface: #ffffff;
+  --primary: #1663d6;
+  --text: #142238;
+  --text-secondary: #52627a;
+  --border: #dce5f2;
+
+  /* Derived roles */
+  --surface-raised: #ffffff;
+  --surface-sunken: #eaf0fa;
+  --primary-contrast: #ffffff;
+  --primary-soft: #e4edfd;
+  --danger: #b3261e;
+  --danger-soft: #fdeceb;
+  --success: #126b45;
+  --success-soft: #e3f4ec;
+  --warning: #8a5300;
+  --warning-soft: #fdf0dc;
+  --overlay: rgb(20 34 56 / 40%);
+
+  /* Glass surfaces. §13: blur is clipped to small surfaces and always has a solid fallback. */
+  --glass-bg: rgb(255 255 255 / 72%);
+  --glass-border: rgb(220 229 242 / 90%);
+
+  /* §13: "an 8 dp spacing rhythm with 4 dp for small adjustments" */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* §13: "20–24 dp card corners, 12–16 dp input corners" */
+  --radius-card: 22px;
+  --radius-input: 14px;
+  --radius-pill: 999px;
+
+  /* §13: "a clear type hierarchy around 13/16/20/30 sp" */
+  --font-xs: 0.75rem;
+  --font-sm: 0.8125rem;
+  --font-base: 1rem;
+  --font-lg: 1.25rem;
+  --font-xl: 1.875rem;
+
+  --shadow-card: 0 1px 2px rgb(20 34 56 / 4%), 0 8px 24px rgb(20 34 56 / 6%);
+  --shadow-sheet: 0 -2px 24px rgb(20 34 56 / 12%);
+
+  /* §13: "48 dp minimum touch targets" */
+  --touch-target: 48px;
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    /* §13 token table — dark */
+    --bg: #0b1220;
+    --surface: #152033;
+    --primary: #80b4ff;
+    --text: #f1f5fc;
+    --text-secondary: #adbed6;
+    --border: #2d3d55;
+
+    --surface-raised: #1b2840;
+    --surface-sunken: #0f1829;
+    --primary-contrast: #06152c;
+    --primary-soft: #1d3255;
+    --danger: #ffb4ab;
+    --danger-soft: #3b1a17;
+    --success: #7fd6ab;
+    --success-soft: #11301f;
+    --warning: #f2c07a;
+    --warning-soft: #33250f;
+    --overlay: rgb(0 0 0 / 56%);
+
+    --glass-bg: rgb(21 32 51 / 76%);
+    --glass-border: rgb(45 61 85 / 90%);
+
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 28%);
+    --shadow-sheet: 0 -2px 24px rgb(0 0 0 / 45%);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b1220;
+  --surface: #152033;
+  --primary: #80b4ff;
+  --text: #f1f5fc;
+  --text-secondary: #adbed6;
+  --border: #2d3d55;
+  --surface-raised: #1b2840;
+  --surface-sunken: #0f1829;
+  --primary-contrast: #06152c;
+  --primary-soft: #1d3255;
+  --danger: #ffb4ab;
+  --danger-soft: #3b1a17;
+  --success: #7fd6ab;
+  --success-soft: #11301f;
+  --warning: #f2c07a;
+  --warning-soft: #33250f;
+  --overlay: rgb(0 0 0 / 56%);
+  --glass-bg: rgb(21 32 51 / 76%);
+  --glass-border: rgb(45 61 85 / 90%);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 28%);
+  --shadow-sheet: 0 -2px 24px rgb(0 0 0 / 45%);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--font-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  /* Room for the fixed bottom navigation plus the home indicator. */
+  padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+}
+
+/*
+ * §13: "Never blur readable text or put every list row behind an expensive live blur." Blur is
+ * opt-in per surface and disabled entirely when the owner asks for reduced transparency.
+ */
+.glass {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .glass {
+    background: var(--surface);
+  }
+}
+
+:root[data-reduce-transparency="true"] .glass {
+  background: var(--surface);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * §13: "tabular digits for money". Without this, a column of amounts jitters as digits change
+ * width, which makes scanning a ledger unpleasant and comparison harder.
+ */
+.money {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  white-space: nowrap;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+h1 {
+  font-size: var(--font-xl);
+  font-weight: 700;
+}
+
+h2 {
+  font-size: var(--font-lg);
+  font-weight: 650;
+}
+
+h3 {
+  font-size: var(--font-base);
+  font-weight: 620;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* A single visible focus treatment everywhere, for keyboard and switch access (§13). */
+:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+:where(button, a, input, select, textarea):focus:not(:focus-visible) {
+  outline: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

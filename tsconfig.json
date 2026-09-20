@@ -1,10 +1,18 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "module": "NodeNext",
-    "moduleResolution": "nodenext",
-
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    /*
+     * `preserve` (which implies bundler resolution) is what Next.js's own subpath type exports
+     * expect — under `nodenext`, `next/link`, `next/navigation` and `next/headers` all fail to
+     * resolve. It still permits the explicit `.ts` import extensions that Node's native TypeScript
+     * loader needs when it runs the tests directly.
+     */
+    "module": "preserve",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
@@ -12,7 +20,6 @@
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-
     /*
      * `node --test` runs the domain and data tests by stripping types at load time rather than
      * compiling them, so every source file must use erasable syntax only: no `enum`, no
@@ -21,13 +28,11 @@
      */
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
-
     /*
      * Node's native TypeScript loader resolves what is literally written, so intra-project imports
      * carry the `.ts` extension. Safe here because the project never emits via tsc.
      */
     "allowImportingTsExtensions": true,
-
     "allowJs": false,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -35,12 +40,29 @@
     "isolatedModules": true,
     "incremental": true,
     "noEmit": true,
-    "jsx": "preserve",
-    "plugins": [{ "name": "next" }],
+    "jsx": "react-jsx",
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ]
     }
   },
-  "include": ["next-env.d.ts", "src/**/*.ts", "src/**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", ".next", "dist"]
+  "include": [
+    "next-env.d.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "scripts/**/*.ts",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next",
+    "dist"
+  ]
 }
