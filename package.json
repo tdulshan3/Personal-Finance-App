@@ -14,6 +14,7 @@
     "test:watch": "node --test --watch \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run test",
+    "probe:extraction": "node scripts/probe-extraction-endpoint.ts",
     "deploy:s20": "bash scripts/deploy-to-termux.sh"
   },
   "dependencies": {

@@ -205,26 +205,31 @@ function formatIpv6(bytes: readonly number[]): string {
 function classifyIpv6(bytes: readonly number[]): { addressClass: AddressClass; canonical: string } {
   const isAllZeroPrefix = (upTo: number): boolean =>
     bytes.slice(0, upTo).every((byte) => byte === 0);
-
-  // `::ffff:a.b.c.d` (v4-mapped) and the deprecated `::a.b.c.d` (v4-compatible) both reach an
-  // IPv4 destination, so they are classified by the embedded address instead of looking "public".
-  const mapped =
-    isAllZeroPrefix(10) && bytes[10] === 0xff && bytes[11] === 0xff
-      ? bytes.slice(12)
-      : isAllZeroPrefix(12) && !bytes.slice(12).every((byte) => byte === 0)
-        ? bytes.slice(12)
-        : null;
-  if (mapped) {
-    return { addressClass: classifyIpv4(mapped), canonical: formatIpv4(mapped) };
-  }
-
   const canonical = formatIpv6(bytes);
+
+  // `::` and `::1` must be settled before the embedded-IPv4 forms, or `::1` reads as `0.0.0.1`.
   if (bytes.every((byte) => byte === 0)) {
     return { addressClass: AddressClass.UNSPECIFIED, canonical };
   }
   if (isAllZeroPrefix(15) && bytes[15] === 1) {
     return { addressClass: AddressClass.LOOPBACK, canonical };
   }
+
+  /*
+   * `::ffff:a.b.c.d` (v4-mapped) and the deprecated `::a.b.c.d` (v4-compatible) both reach an
+   * IPv4 destination, so they are classified by the embedded address instead of looking "public".
+   * `::ffff:a9fe:a9fe` is how the metadata service hides inside an IPv6 literal.
+   */
+  const mapped =
+    isAllZeroPrefix(10) && bytes[10] === 0xff && bytes[11] === 0xff
+      ? bytes.slice(12)
+      : isAllZeroPrefix(12) && (bytes[12] ?? 0) !== 0
+        ? bytes.slice(12)
+        : null;
+  if (mapped) {
+    return { addressClass: classifyIpv4(mapped), canonical: formatIpv4(mapped) };
+  }
+
   const first = bytes[0] ?? 0;
   const second = bytes[1] ?? 0;
   if (first === 0xfe && (second & 0xc0) === 0x80) {
@@ -521,9 +526,10 @@ export function redactUrl(value: string): string {
  * was approved.
  */
 export function assertEndpointAllowed(url: string | URL, policy: EndpointPolicy): URL {
+  const rawInput = typeof url === "string" ? url : url.toString();
   let parsed: URL;
   try {
-    parsed = url instanceof URL ? new URL(url.toString()) : new URL(url);
+    parsed = new URL(rawInput);
   } catch {
     throw endpointDenied(
       EndpointRejection.MALFORMED_URL,
@@ -572,12 +578,19 @@ export function assertEndpointAllowed(url: string | URL, policy: EndpointPolicy)
   }
 
   /*
-   * Traversal check runs on the *raw* path as well as the parsed one. `new URL` already collapses
-   * `/v1/../admin`, but an encoded `%2e%2e` survives parsing and would be re-decoded by some
-   * servers (buildspec.md §22 "path/URL tricks").
+   * Traversal is checked on the string the caller handed in, not only on the parsed result.
+   * `new URL` silently collapses `/v1/../admin` into `/admin` and decodes `%2e%2e` into `..`, so
+   * by the time the path is parsed the trick is invisible; some servers then re-decode it on their
+   * side (buildspec.md §22 "path/URL tricks"). The exact-path allowlist below is the real defence,
+   * but a crafted path deserves its own named reason rather than a generic "not allowed".
    */
   const rawPath = parsed.pathname;
-  if (/%2e/i.test(rawPath) || /(^|\/)\.\.(\/|$)/.test(decodeSafe(rawPath))) {
+  const traversal = /(^|\/)\.\.(\/|$)/;
+  if (
+    /%2e/i.test(rawInput) ||
+    traversal.test(rawInput.replace(/^[a-z]+:\/\//i, "")) ||
+    traversal.test(decodeSafe(rawPath))
+  ) {
     throw endpointDenied(EndpointRejection.PATH_TRAVERSAL, `Path '${rawPath}' contains traversal segments`, {
       path: rawPath,
     });

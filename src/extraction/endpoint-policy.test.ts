@@ -229,8 +229,7 @@ describe("assertEndpointAllowed", () => {
     expectRejection(EndpointRejection.PATH_TRAVERSAL, () =>
       assertEndpointAllowed("http://192.168.1.118:8081/v1/%2e%2e/%2e%2e/etc/passwd", policy),
     );
-    // `new URL` collapses a literal `..`, so this one lands on a path outside the allowlist.
-    expectRejection(EndpointRejection.PATH_NOT_ALLOWED, () =>
+    expectRejection(EndpointRejection.PATH_TRAVERSAL, () =>
       assertEndpointAllowed("http://192.168.1.118:8081/v1/../admin", policy),
     );
     expectRejection(EndpointRejection.FRAGMENT_NOT_ALLOWED, () =>
@@ -387,7 +386,7 @@ describe("transport controls", () => {
   test("never requests a path outside the allowlist, even with a crafted path argument", async () => {
     const policy = lanPolicy();
     let called = false;
-    await expectRejectionAsync(EndpointRejection.PATH_NOT_ALLOWED, () =>
+    await expectRejectionAsync(EndpointRejection.PATH_TRAVERSAL, () =>
       requestJson(policy, {
         path: "/../../etc/passwd",
         fetchImpl: fakeFetch(() => {

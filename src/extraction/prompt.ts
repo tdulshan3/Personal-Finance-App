@@ -23,7 +23,94 @@ Return literal evidence text for important fields.
 Classify OTP, promotion, failure, pending payment, posted payment,
 bill, refund, and balance notice separately. You have no tools.`;
 
-export const EXTRACTION_PROMPT_VERSION = "qwen-extract-v1";
+/**
+ * v2 — the §7.3 instruction above, kept verbatim, plus field rules, an ordered decision list and
+ * four worked examples.
+ *
+ * buildspec.md §7.3 offers its text as "the starting prompt", and §7.2 requires "fixture evaluation
+ * before acceptance" of a change. That evaluation was run against the owner's real endpoint
+ * (llama.cpp, `qwen3.5-0.8b`, Q4_0, temperature 0) over the 14 labelled fixtures in
+ * `fixtures/messages/`. Measured, and written up in `docs/extraction-eval.md`:
+ *
+ * ```text
+ *                       event_type   amount_text
+ *   v1 (spec verbatim)     7/14          2/14
+ *   v2 (field rules)       9/14         11/14
+ *   v3 (this prompt)      10/14         13/14
+ * ```
+ *
+ * The v1 failure that matters most: asked to extract from "Purchase of LKR 3,450.00 at KEELLS
+ * SUPER", the model returned `amount_text: "Purchase of LKR 3,450.00"` — the whole phrase — which
+ * `validate-evidence` then rejected as unparseable. Every message would have reached the review
+ * queue carrying a candidate the owner had to retype. Stating the field format and ordering the
+ * classification decisions fixed that without loosening a single validation rule.
+ *
+ * Two details worth keeping:
+ *   - The examples are deliberately mixed (expense, income, promotion, balance notice). An earlier
+ *     draft with only an expense example pushed the model to answer `posted_expense` for almost
+ *     everything, losing promotions it had previously classified correctly.
+ *   - The schema's own `description` fields do nothing on this host: llama.cpp compiles the schema
+ *     to a GBNF grammar and never shows it to the model. Field guidance therefore has to live here.
+ */
+export const EXTRACTION_INSTRUCTION_V2 = `${EXTRACTION_INSTRUCTION}
+
+FIELD RULES
+amount_text: digits, separators and decimal point ONLY. No words, no
+  currency code, no label. "Purchase of LKR 3,450.00" -> "3,450.00".
+  Use null when no single transaction amount is stated.
+balance_text: same format. The account balance only, never the
+  transaction amount.
+currency: the 3-letter code alone, e.g. "LKR".
+merchant_text: the shop or payee name alone, without "at" or "to".
+occurred_at_text: the date exactly as the message writes it.
+reference_text: a reference number printed in the message, never the
+  source_id. null when the message states none.
+evidence: short literal quotes copied from the message, unchanged.
+
+CHOOSING event_type — check in this order:
+1. Is there a one-time code / PIN / OTP? -> "otp". amount_text: null.
+2. Is it marketing (offer, discount, %, win, T&C apply, unsubscribe)?
+   -> "promotion". amount_text: null.
+3. Was it declined, failed, reversed or unsuccessful? -> "failed".
+4. Does it say the money WILL move later (will be debited, scheduled,
+   standing order, due on)? -> "pending_payment".
+5. Is it an invoice or reminder for an amount DUE LATER? -> "bill".
+6. Is money being returned to the account (refund, reversal credit)?
+   -> "refund".
+7. Did money ARRIVE (credited, received, salary, deposit, transferred to
+   you)? -> "posted_income".
+8. Did money LEAVE (purchase, debit, spent, withdrawal, paid)?
+   -> "posted_expense".
+9. Only a balance and no transaction? -> "balance_notice".
+   amount_text: null, balance_text: the balance.
+
+EXAMPLES
+"Debit of LKR 1,250.50 at CARGILLS FOOD CITY using card ****9876 on
+14/03/2026. Available balance LKR 20,100.00."
+-> posted_expense, amount_text "1,250.50", merchant_text "CARGILLS FOOD
+CITY", account_suffix "9876", balance_text "20,100.00", balance_type
+"available".
+
+"Your salary of LKR 185,000.00 has been credited to account ****4321 on
+25/03/2026."
+-> posted_income, amount_text "185,000.00", account_suffix "4321".
+
+"Enjoy 15% off at all partner restaurants this month with your card.
+T&C apply."
+-> promotion, amount_text null, merchant_text null.
+
+"Your account ****4321 balance is LKR 118,004.55 as at 20/03/2026."
+-> balance_notice, amount_text null, balance_text "118,004.55".`;
+
+/** The instruction actually sent. Changing this requires a new version and a fresh evaluation. */
+export const ACTIVE_EXTRACTION_INSTRUCTION = EXTRACTION_INSTRUCTION_V2;
+
+/**
+ * buildspec.md §7.2: "Save its digest and parser/prompt version with each extraction." A stored
+ * `qwen-extract-v1` record was produced by the verbatim instruction; `v3` by the one above. The
+ * jump from v1 skips the intermediate draft, which was measured but never shipped.
+ */
+export const EXTRACTION_PROMPT_VERSION = "qwen-extract-v3";
 
 /**
  * Fence markers around the untrusted message body.
@@ -90,7 +177,7 @@ export function buildUserMessage(sourceId: string, text: string): string {
 
 export function buildExtractionMessages(sourceId: string, text: string): readonly ChatMessage[] {
   return Object.freeze([
-    { role: "system", content: EXTRACTION_INSTRUCTION },
+    { role: "system", content: ACTIVE_EXTRACTION_INSTRUCTION },
     { role: "user", content: buildUserMessage(sourceId, text) },
   ] as const);
 }
