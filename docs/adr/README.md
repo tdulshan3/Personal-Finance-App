@@ -18,6 +18,7 @@ ADR spells out which.
 | [0005](0005-llama-cpp-openai-endpoint-instead-of-ollama.md) | llama.cpp's OpenAI-compatible endpoint instead of Ollama's native API | §7.2, §7.3 (transport) |
 | [0006](0006-money-as-bigint-minor-units.md) | Money as `bigint` minor units, decimal strings on the wire | — (implements §9.1, §16) |
 | [0007](0007-http-session-auth-for-the-phone-server.md) | Unlocking is authentication: one passphrase, an in-memory session token, loopback by default | §3 (the "no HTTP server" rule), fills §16/§18 |
+| [0008](0008-bind-the-ledger-to-the-lan.md) | Bound to the LAN by owner choice, accepting a cleartext passphrase until TLS lands | amends 0007 |
 
 ## Known conflicts without an ADR yet
 
@@ -31,10 +32,10 @@ ADR spells out which.
   server. There is also an ordering problem created by [ADR 0003](0003-sqlite-encryption-with-passphrase-derived-key.md):
   the server starts locked, so there is no key available to encrypt a stored refresh token until the
   owner unlocks. Needed before M3.
-- **Transport encryption and client pairing.** [ADR 0007](0007-http-session-auth-for-the-phone-server.md)
-  authenticates the session but leaves the transport unencrypted, so the server stays on loopback.
-  §18's "authenticate paired clients, encrypt transport" is not met and needs a successor ADR before
-  `--expose-lan` is used on any shared network.
+- **Transport encryption and client pairing.** [ADR 0008](0008-bind-the-ledger-to-the-lan.md) put the
+  server on the LAN over plain HTTP, so the passphrase now crosses the network in cleartext on every
+  unlock. §18's "authenticate paired clients, encrypt transport" is unmet, and this is no longer
+  theoretical: it is the highest-priority security work outstanding.
 
 ## Format
 
