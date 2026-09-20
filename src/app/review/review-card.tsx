@@ -28,6 +28,9 @@ export type ReviewCardData = {
   suggestedAccountId: string | null;
   suggestedCategoryId: string | null;
   possibleDuplicate: { transactionId: string; label: string } | null;
+  pairedWith: { eventId: string; sender: string; sourceText: string | null } | null;
+  /** Reloads the inbox with this pairing undone. */
+  splitHref: string | null;
 };
 
 const FLAG_LABELS: Record<string, string> = {
@@ -80,6 +83,31 @@ export function ReviewCard({
         </blockquote>
       ) : null}
 
+      {data.pairedWith ? (
+        <>
+          <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center" }}>
+            <Badge tone="success">Same payment</Badge>
+            <strong>{data.pairedWith.sender}</strong>
+          </div>
+          {data.pairedWith.sourceText ? (
+            <blockquote
+              style={{
+                margin: 0, padding: "var(--space-3) var(--space-4)", background: "var(--surface-sunken)",
+                borderRadius: "var(--radius-input)", fontSize: "var(--font-sm)", whiteSpace: "pre-wrap",
+                overflowWrap: "anywhere",
+              }}
+            >
+              {data.pairedWith.sourceText}
+            </blockquote>
+          ) : null}
+          <p style={{ margin: 0, fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
+            Your bank and {data.pairedWith.sender} both reported this amount within minutes, so it is recorded once:
+            paid from the bank account, filed under what it was for.{" "}
+            {data.splitHref ? <a href={data.splitHref}>Not the same payment? Show them separately</a> : null}
+          </p>
+        </>
+      ) : null}
+
       {data.flags.filter((f) => FLAG_LABELS[f]).map((flag) => (
         <span key={flag} style={{ fontSize: "var(--font-sm)", color: "var(--warning)" }}>
           {FLAG_LABELS[flag]}
@@ -108,6 +136,7 @@ export function ReviewCard({
           }}
         >
           <input type="hidden" name="eventId" value={data.eventId} />
+          {data.pairedWith ? <input type="hidden" name="pairedEventId" value={data.pairedWith.eventId} /> : null}
           {/* One column on a phone; on a wide screen the fields pair up: type+account, amount+date. */}
           <div className={styles.fields}>
             <Field label="Record as">

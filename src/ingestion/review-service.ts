@@ -39,7 +39,20 @@ export type ReviewCard = {
   readonly suggestedCategoryId: string | null;
   /** buildspec.md §8: a fuzzy match is a *suggestion*, never an automatic merge. */
   readonly possibleDuplicate: { transactionId: string; label: string } | null;
+  /**
+   * The other half of the same payment. Paying a bill by bank produces two messages — the bank's
+   * "debited Rs 50.00" and the biller's "recharge of Rs 50.00 successful". They are one event, so
+   * they are shown as one card and recorded as one expense (buildspec.md §8: two sources, one
+   * transaction). The bank's message says which account paid; the biller's says what it was for.
+   */
+  readonly pairedWith: { eventId: string; sender: string; sourceText: string | null } | null;
 };
+
+/** How far apart the two messages of one payment may arrive. Billers can lag the bank by minutes. */
+const PAIR_WINDOW_MS = 30 * 60 * 1000;
+const BANK_WORDING = /\b(debited|debit of|withdrawn|withdrawal|purchase|a\/c|acct?)\b/i;
+const BILLER_WORDING = /\b(recharge|reload|top-?up|bill payment|payment|paid|thank you)\b/i;
+const UTILITY_WORDING = /\b(recharge|reload|top-?up|mobitel|dialog|slt|hutch|airtel|electric|ceb|leco|water|broadband|internet|bill)\b/i;
 
 const newId = (prefix: string) => `${prefix}_${randomUUID().replace(/-/g, "").slice(0, 22)}`;
 
@@ -94,7 +107,45 @@ export function createReviewService(deps: { db: Db; service: FinanceService }) {
     };
   }
 
-  function listOpen(limit = 50): ReviewCard[] {
+  /**
+   * Folds a biller's receipt into the bank debit it belongs to.
+   *
+   * Deliberately strict, because a wrong merge hides a real expense: same amount and currency,
+   * different senders, within half an hour, exactly one side that names an account (the bank) and
+   * one that does not (the biller). Anything looser stays as two cards for the owner to judge, and
+   * `keepApart` lets the owner undo a pairing that was wrong.
+   */
+  function pairUp(cards: ReviewCard[], keepApart: ReadonlySet<string>): ReviewCard[] {
+    const isBank = (c: ReviewCard) => c.accountHint !== null || BANK_WORDING.test(c.sourceText ?? "");
+    const isBiller = (c: ReviewCard) => c.accountHint === null && BILLER_WORDING.test(c.sourceText ?? "");
+    const used = new Set<string>();
+    const merged: ReviewCard[] = [];
+
+    for (const bank of cards) {
+      if (used.has(bank.eventId) || keepApart.has(bank.eventId) || bank.kind !== "posted_expense" || !bank.amount || !isBank(bank)) continue;
+      const biller = cards.find((c) =>
+        c.eventId !== bank.eventId && !used.has(c.eventId) && !keepApart.has(c.eventId) &&
+        c.kind === "posted_expense" && c.amount !== null &&
+        c.amount.minor === bank.amount!.minor && c.amount.currency.code === bank.amount!.currency.code &&
+        c.sender.toLowerCase() !== bank.sender.toLowerCase() &&
+        Math.abs(c.receivedAt - bank.receivedAt) <= PAIR_WINDOW_MS && isBiller(c));
+      if (!biller) continue;
+      used.add(bank.eventId).add(biller.eventId);
+      const merchant = biller.merchantText ?? biller.sender;
+      merged.push({
+        ...bank,
+        merchantText: merchant,
+        suggestedCategoryId: suggestCategory(merchant) ?? (UTILITY_WORDING.test(`${biller.sourceText ?? ""} ${biller.sender}`) ? "utilities" : bank.suggestedCategoryId),
+        flags: [...bank.flags, "paired_messages"],
+        pairedWith: { eventId: biller.eventId, sender: biller.sender, sourceText: biller.sourceText },
+      });
+    }
+    // Keep the inbox's newest-first order; a merged card takes its bank message's place.
+    return cards.filter((c) => !used.has(c.eventId) || merged.some((m) => m.eventId === c.eventId))
+      .map((c) => merged.find((m) => m.eventId === c.eventId) ?? c);
+  }
+
+  function listOpen(limit = 50, keepApart: ReadonlySet<string> = new Set()): ReviewCard[] {
     const rows = db
       .prepare(
         `SELECT e.id AS event_id, e.source_id, e.kind, e.amount_minor, e.currency, e.account_hint,
@@ -108,7 +159,7 @@ export function createReviewService(deps: { db: Db; service: FinanceService }) {
       )
       .all(limit) as Record<string, unknown>[];
 
-    return rows.map((row) => {
+    const cards = rows.map((row): ReviewCard => {
       const candidate = JSON.parse(asText(row.candidate_json, "candidate_json")) as {
         occurredOn?: string | null;
         flags?: string[];
@@ -141,8 +192,10 @@ export function createReviewService(deps: { db: Db; service: FinanceService }) {
         suggestedAccountId: suggestAccount(hint),
         suggestedCategoryId: suggestCategory(merchant),
         possibleDuplicate: findPossibleDuplicate(amount, occurredOn),
+        pairedWith: null,
       };
     });
+    return pairUp(cards, keepApart);
   }
 
   function resolve(eventId: string, status: "accepted" | "ignored", actionId: string | null): void {
@@ -179,6 +232,8 @@ export function createReviewService(deps: { db: Db; service: FinanceService }) {
     merchantName?: string | undefined;
     notes?: string | undefined;
     rememberAccount?: boolean | undefined;
+    /** The biller's receipt shown on the same card; recorded as supporting evidence, not again. */
+    pairedEventId?: string | undefined;
   }): { transactionId: string } {
     const event = db
       .prepare("SELECT id, status, account_hint FROM source_events WHERE id = ?")
@@ -186,6 +241,13 @@ export function createReviewService(deps: { db: Db; service: FinanceService }) {
     if (!event) throw notFound("Review item", input.eventId);
     if (asText(event.status, "status") !== "needs_review") {
       throw validationError("That item was already handled.");
+    }
+
+    if (input.pairedEventId) {
+      const paired = db.prepare("SELECT status FROM source_events WHERE id = ?").get(input.pairedEventId) as Record<string, unknown> | undefined;
+      if (!paired || input.pairedEventId === input.eventId || asText(paired.status, "status") !== "needs_review") {
+        throw validationError("The second message on this card was already handled. Reload and try again.");
+      }
     }
 
     const account = service.findAccount(input.accountId);
@@ -216,6 +278,15 @@ export function createReviewService(deps: { db: Db; service: FinanceService }) {
       ).run(newId("tsrc"), result.transactionId, input.eventId, result.actionId, service.clock.now());
 
       resolve(input.eventId, "accepted", result.actionId);
+
+      // One expense, two pieces of evidence. The receipt is linked and closed, never posted.
+      if (input.pairedEventId) {
+        db.prepare(
+          `INSERT INTO transaction_sources (id, transaction_id, source_event_id, relation, action_id, created_at)
+           VALUES (?,?,?,'supporting',?,?)`,
+        ).run(newId("tsrc"), result.transactionId, input.pairedEventId, result.actionId, service.clock.now());
+        resolve(input.pairedEventId, "accepted", result.actionId);
+      }
 
       // "Map masked identifiers" (§13): remember which account this suffix means.
       const hint = asOptionalText(event.account_hint, "account_hint");

@@ -35,6 +35,7 @@ export async function acceptReviewAction(_prev: ReviewState, formData: FormData)
       occurredOn: text("occurredOn"),
       merchantName: text("merchantName") || undefined,
       notes: text("notes") || undefined,
+      pairedEventId: text("pairedEventId") || undefined,
     });
     revalidatePath("/review");
     revalidatePath("/transactions");
