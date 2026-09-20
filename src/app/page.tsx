@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { localDateOf, parseLocalDate, toLocalDate } from "../core/domain/time.ts";
+import { backgroundStatus, currentProcessor } from "../server/background.ts";
 import { requireService, unlockedSince } from "../server/runtime.ts";
 import { accessState } from "../server/session.ts";
 import { QuickLinks } from "../ui/navigation.tsx";
@@ -15,9 +16,9 @@ export const dynamic = "force-dynamic";
  * Home.
  *
  * buildspec.md §13 requires: "Liquid balance, amount owed, current-period spending, upcoming bills,
- * suggested savings, source health, unresolved review count, recent transactions." Bills, savings
- * and source health belong to later milestones, so they appear as honest "not built yet" tiles
- * rather than as zeroes that look like real answers.
+ * suggested savings, source health, unresolved review count, recent transactions." Bills and
+ * savings belong to later milestones, so they appear as an honest "still to come" note rather than
+ * as zeroes that look like real answers.
  */
 export default async function HomePage() {
   const access = await accessState();
@@ -33,6 +34,8 @@ export default async function HomePage() {
   const recent = service.searchTransactions({ limit: 6 });
   const categories = new Map(service.listCategories().map((c) => [c.id, c.name]));
   const unlockedAt = unlockedSince();
+  const inbox = currentProcessor()?.counts() ?? { staged: 0, waitingForModel: 0, openReviews: 0 };
+  const capture = backgroundStatus();
 
   const liquidEntries = [...totals.liquid.entries()];
   const owedEntries = [...totals.owed.entries()].filter(([, value]) => value.minor !== 0n);
@@ -88,6 +91,25 @@ export default async function HomePage() {
         </div>
       </Card>
 
+      {inbox.openReviews > 0 ? (
+        <Card tone="glass">
+          <Link
+            href="/review"
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "var(--space-4)", textDecoration: "none", color: "inherit", minHeight: "var(--touch-target)" }}
+          >
+            <span style={{ display: "grid", gap: "2px" }}>
+              <strong>
+                {inbox.openReviews} message{inbox.openReviews === 1 ? "" : "s"} to review
+              </strong>
+              <span style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
+                Read from your bank messages. Nothing is recorded until you accept it.
+              </span>
+            </span>
+            <Badge tone="primary">Review</Badge>
+          </Link>
+        </Card>
+      ) : null}
+
       <QuickLinks />
 
       <Card
@@ -138,9 +160,11 @@ export default async function HomePage() {
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {item.merchantName ?? labelForKind(item.kind)}
                   </span>
-                  <span style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
-                    {categories.get(item.categoryId ?? "") ?? labelForKind(item.kind)} ·{" "}
-                    {item.occurredLocalDate}
+                  <span style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {/* Only a label that adds something: "Opening balance · Opening balance" does not. */}
+                    {[categories.get(item.categoryId ?? "") ?? (item.merchantName ? labelForKind(item.kind) : null), item.occurredLocalDate]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </span>
                 </div>
                 <Amount value={item.amount} srLabel={labelForKind(item.kind)} />
@@ -150,22 +174,15 @@ export default async function HomePage() {
         )}
       </Card>
 
-      {/* Milestones M4-M6. Stated as not built rather than shown as an empty real value. */}
-      <Card title="Not built yet">
+      <Card title="Message capture">
         <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
-          <Badge>Bills and reminders</Badge>
-          <Badge>Forecast and savings</Badge>
-          <Badge>Message capture</Badge>
-          <Badge>Assistant</Badge>
+          {capture.active ? <Badge tone="success">Checking every minute</Badge> : <Badge tone="warning">Paused</Badge>}
+          {inbox.staged > 0 ? <Badge>{inbox.staged} not read yet</Badge> : null}
+          {inbox.waitingForModel > 0 ? <Badge tone="warning">{inbox.waitingForModel} waiting for the model</Badge> : null}
+          {inbox.openReviews === 0 && inbox.staged === 0 ? <Badge>All caught up</Badge> : null}
         </div>
-        <p
-          style={{
-            marginTop: "var(--space-3)",
-            fontSize: "var(--font-sm)",
-            color: "var(--text-secondary)",
-          }}
-        >
-          These are the next milestones. Nothing above depends on them.
+        <p style={{ marginTop: "var(--space-3)", fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
+          Still to come: bills and reminders, forecasts and savings, Gmail. Nothing above depends on them.
         </p>
       </Card>
     </Shell>
