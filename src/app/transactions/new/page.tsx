@@ -13,7 +13,11 @@ export const dynamic = "force-dynamic";
  *
  * One form, so the page stays `narrow` on a desktop rather than stretching its fields.
  */
-export default async function NewTransactionPage() {
+export default async function NewTransactionPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const access = await accessState();
   if (access.kind === "needs-setup") redirect("/setup");
   if (access.kind !== "ready") redirect("/unlock");
@@ -22,6 +26,21 @@ export default async function NewTransactionPage() {
   const accounts = service.listAccounts();
   const categories = service.listCategories();
   const today = localDateOf(Date.now(), service.zone);
+
+  // A link may pre-fill the form (Bills: "Record payment"). Only values that name a real account
+  // or look like an amount are passed on; the form still validates everything on submit.
+  const params = await searchParams;
+  const param = (key: string) => (typeof params[key] === "string" ? (params[key] as string) : undefined);
+  const known = (id: string | undefined) => (id && accounts.some((a) => a.id === id) ? id : undefined);
+  const kindParam = param("kind");
+  const to = known(param("to"));
+  const initial = {
+    kind: kindParam && ["expense", "income", "transfer", "refund"].includes(kindParam) ? kindParam : undefined,
+    toAccountId: to,
+    // Paying a card: start from the first account that is not the card itself.
+    fromAccountId: known(param("from")) ?? (to ? accounts.find((a) => a.id !== to && a.kind === "asset")?.id : undefined),
+    amount: /^\d{1,12}(\.\d{1,2})?$/.test(param("amount") ?? "") ? param("amount") : undefined,
+  };
 
   if (accounts.length === 0) {
     return (
@@ -51,6 +70,7 @@ export default async function NewTransactionPage() {
           }))}
           categories={categories.map((c) => ({ id: c.id, name: c.name }))}
           today={today}
+          initial={initial}
         />
       </Card>
     </Shell>

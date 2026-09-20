@@ -104,6 +104,18 @@
   font-weight: 600;
 }
 
+/* Under the total: what it is made of. */
+.split {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-6);
+}
+
+.split > div {
+  display: grid;
+  gap: 2px;
+}
+
 /* Category breakdown: ring beside its legend when wide, above it when narrow. */
 .breakdown {
   display: grid;

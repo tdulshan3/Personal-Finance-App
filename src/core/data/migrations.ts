@@ -660,12 +660,23 @@ CREATE TABLE approval_receipts (
 ) STRICT;
 `;
 
+const MIGRATION_006 = /* sql */ `
+-- When a credit line's bill falls due. Beside the account rather than on it: it is a fact about
+-- the lender's calendar, not about the ledger, and nothing in the posting rules depends on it.
+CREATE TABLE account_payment_terms (
+  account_id TEXT PRIMARY KEY REFERENCES ledger_accounts(id),
+  due_day    INTEGER NOT NULL CHECK (due_day BETWEEN 1 AND 31),
+  updated_at INTEGER NOT NULL
+) STRICT;
+`;
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   Object.freeze({ version: 1, name: "ledger-foundation", sql: MIGRATION_001 }),
   Object.freeze({ version: 2, name: "inference-endpoints", sql: MIGRATION_002 }),
   Object.freeze({ version: 3, name: "message-sources-and-jobs", sql: MIGRATION_003 }),
   Object.freeze({ version: 4, name: "credit-limits", sql: MIGRATION_004 }),
   Object.freeze({ version: 5, name: "assistant-proposals", sql: MIGRATION_005 }),
+  Object.freeze({ version: 6, name: "card-payment-terms", sql: MIGRATION_006 }),
 ]);
 
 function checksumOf(migration: Migration): string {
