@@ -6,6 +6,7 @@ import { ErrorNote } from "../../../ui/primitives.tsx";
 import { Button, Field, FormRow, MoneyInput, Select, TextInput } from "../../../ui/form.tsx";
 import type { ActionState } from "../../actions.ts";
 import { createTransactionAction } from "../../actions.ts";
+import styles from "../transaction-form.module.css";
 
 type AccountOption = { id: string; name: string; currency: string; kind: string };
 
@@ -60,129 +61,135 @@ export function NewTransactionForm({
     >
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <FormRow>
-        <Field label="Type">
-          {({ id, describedBy }) => (
-            <Select
-              id={id}
-              name="kind"
-              value={kind}
-              onChange={(event) => setKind(event.target.value)}
-              describedBy={describedBy}
-            >
-              {KINDS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          )}
-        </Field>
-
-        <Field label={isTransfer ? "From account" : "Account"}>
-          {({ id, describedBy }) => (
-            <Select
-              id={id}
-              name="accountId"
-              value={accountId}
-              onChange={(event) => setAccountId(event.target.value)}
-              describedBy={describedBy}
-              required
-            >
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name} ({account.currency})
-                </option>
-              ))}
-            </Select>
-          )}
-        </Field>
-
-        {isTransfer ? (
-          <Field
-            label="To account"
-            hint="Paying a credit card is a transfer, not a second expense."
-          >
-            {({ id, describedBy }) => (
-              <Select id={id} name="toAccountId" describedBy={describedBy} required>
-                {accounts
-                  .filter((account) => account.id !== accountId)
-                  .map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.name} ({account.currency})
+        {/* Two to a line on a desktop; on a phone this wrapper has no box and nothing changes. */}
+        <div className={styles.pairs}>
+          {/* A transfer's Type keeps its own line, so From and To pair up underneath it. */}
+          <div className={isTransfer ? styles.cellWide : styles.cell}>
+            <Field label="Type">
+              {({ id, describedBy }) => (
+                <Select
+                  id={id}
+                  name="kind"
+                  value={kind}
+                  onChange={(event) => setKind(event.target.value)}
+                  describedBy={describedBy}
+                >
+                  {KINDS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
                     </option>
                   ))}
-              </Select>
-            )}
-          </Field>
-        ) : null}
+                </Select>
+              )}
+            </Field>
+          </div>
 
-        <Field label="Amount" hint={`Entered in ${currency}. Use a dot for decimals.`}>
-          {({ id, describedBy }) => (
-            <MoneyInput
-              id={id}
-              name="amount"
-              currencyCode={currency}
-              required
-              placeholder="0.00"
-              describedBy={describedBy}
-            />
-          )}
-        </Field>
-
-        {isTransfer ? (
-          <Field label="Fee (optional)" hint="Charged separately so it shows as spending, not as transferred money.">
-            {({ id, describedBy }) => (
-              <MoneyInput
-                id={id}
-                name="fee"
-                currencyCode={currency}
-                placeholder="0.00"
-                describedBy={describedBy}
-              />
-            )}
-          </Field>
-        ) : null}
-
-        <Field label="Date" hint="The day the money moved, not the day you are recording it.">
-          {({ id, describedBy }) => (
-            <TextInput
-              id={id}
-              name="occurredOn"
-              type="date"
-              defaultValue={today}
-              max={today}
-              required
-              describedBy={describedBy}
-            />
-          )}
-        </Field>
-
-        {showCategory ? (
-          <Field label="Category">
+          <Field label={isTransfer ? "From account" : "Account"}>
             {({ id, describedBy }) => (
               <Select
                 id={id}
-                name="categoryId"
-                defaultValue={kind === "income" ? "income" : "uncategorized"}
+                name="accountId"
+                value={accountId}
+                onChange={(event) => setAccountId(event.target.value)}
                 describedBy={describedBy}
+                required
               >
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name} ({account.currency})
                   </option>
                 ))}
               </Select>
             )}
           </Field>
-        ) : null}
 
-        {!isTransfer ? (
-          <Field label="Merchant or payer (optional)">
+          {isTransfer ? (
+            <Field
+              label="To account"
+              hint="Paying a credit card is a transfer, not a second expense."
+            >
+              {({ id, describedBy }) => (
+                <Select id={id} name="toAccountId" describedBy={describedBy} required>
+                  {accounts
+                    .filter((account) => account.id !== accountId)
+                    .map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name} ({account.currency})
+                      </option>
+                    ))}
+                </Select>
+              )}
+            </Field>
+          ) : null}
+
+          <Field label="Amount" hint={`Entered in ${currency}. Use a dot for decimals.`}>
             {({ id, describedBy }) => (
-              <TextInput id={id} name="merchantName" maxLength={120} describedBy={describedBy} />
+              <MoneyInput
+                id={id}
+                name="amount"
+                currencyCode={currency}
+                required
+                placeholder="0.00"
+                describedBy={describedBy}
+              />
             )}
           </Field>
-        ) : null}
+
+          {isTransfer ? (
+            <Field label="Fee (optional)" hint="Charged separately so it shows as spending, not as transferred money.">
+              {({ id, describedBy }) => (
+                <MoneyInput
+                  id={id}
+                  name="fee"
+                  currencyCode={currency}
+                  placeholder="0.00"
+                  describedBy={describedBy}
+                />
+              )}
+            </Field>
+          ) : null}
+
+          <Field label="Date" hint="The day the money moved, not the day you are recording it.">
+            {({ id, describedBy }) => (
+              <TextInput
+                id={id}
+                name="occurredOn"
+                type="date"
+                defaultValue={today}
+                max={today}
+                required
+                describedBy={describedBy}
+              />
+            )}
+          </Field>
+
+          {showCategory ? (
+            <Field label="Category">
+              {({ id, describedBy }) => (
+                <Select
+                  id={id}
+                  name="categoryId"
+                  defaultValue={kind === "income" ? "income" : "uncategorized"}
+                  describedBy={describedBy}
+                >
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          ) : null}
+
+          {!isTransfer ? (
+            <Field label="Merchant or payer (optional)">
+              {({ id, describedBy }) => (
+                <TextInput id={id} name="merchantName" maxLength={120} describedBy={describedBy} />
+              )}
+            </Field>
+          ) : null}
+        </div>
 
         <Field label="Notes (optional)">
           {({ id, describedBy }) => (

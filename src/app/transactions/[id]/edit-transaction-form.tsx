@@ -6,6 +6,7 @@ import { ErrorNote, InfoNote } from "../../../ui/primitives.tsx";
 import { Button, Field, FormRow, MoneyInput, Select, TextInput } from "../../../ui/form.tsx";
 import type { EditTransactionState } from "./actions.ts";
 import { editTransactionAction } from "./actions.ts";
+import styles from "../transaction-form.module.css";
 
 export type EditTransactionData = {
   id: string;
@@ -82,81 +83,87 @@ export function EditTransactionForm({
           </InfoNote>
         ) : null}
 
-        <Field
-          label={isIncome ? "Received into" : "Paid from"}
-          {...(selected?.archived
-            ? { hint: "This account is archived. Restore it on Accounts, or pick another, before saving." }
-            : {})}
-        >
-          {({ id, describedBy }) => (
-            <Select
-              id={id}
-              name="accountId"
-              value={accountId}
-              onChange={(event) => setAccountId(event.target.value)}
-              describedBy={describedBy}
-              required
+        {/* Two to a line on a desktop; on a phone these wrappers have no box and nothing changes. */}
+        <div className={styles.pairs}>
+          {/* The account keeps its own line, so Amount pairs with Date and Category with Merchant. */}
+          <div className={styles.cellWide}>
+            <Field
+              label={isIncome ? "Received into" : "Paid from"}
+              {...(selected?.archived
+                ? { hint: "This account is archived. Restore it on Accounts, or pick another, before saving." }
+                : {})}
             >
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name} ({account.currency}){account.archived ? " — archived" : ""}
-                </option>
-              ))}
-            </Select>
-          )}
-        </Field>
+              {({ id, describedBy }) => (
+                <Select
+                  id={id}
+                  name="accountId"
+                  value={accountId}
+                  onChange={(event) => setAccountId(event.target.value)}
+                  describedBy={describedBy}
+                  required
+                >
+                  {accounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name} ({account.currency}){account.archived ? " — archived" : ""}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          </div>
 
-        <Field label="Amount" hint={`Entered in ${currency}. Use a dot for decimals.`}>
-          {({ id, describedBy }) => (
-            <MoneyInput
-              id={id}
-              name="amount"
-              currencyCode={currency}
-              defaultValue={data.amountValue}
-              required
-              placeholder="0.00"
-              describedBy={describedBy}
-            />
-          )}
-        </Field>
+          <Field label="Amount" hint={`Entered in ${currency}. Use a dot for decimals.`}>
+            {({ id, describedBy }) => (
+              <MoneyInput
+                id={id}
+                name="amount"
+                currencyCode={currency}
+                defaultValue={data.amountValue}
+                required
+                placeholder="0.00"
+                describedBy={describedBy}
+              />
+            )}
+          </Field>
 
-        <Field label="Date" hint="The day the money moved, not the day you are recording it.">
-          {({ id, describedBy }) => (
-            <TextInput
-              id={id}
-              name="occurredOn"
-              type="date"
-              defaultValue={data.date}
-              max={data.maxDate}
-              required
-              describedBy={describedBy}
-            />
-          )}
-        </Field>
+          <Field label="Date" hint="The day the money moved, not the day you are recording it.">
+            {({ id, describedBy }) => (
+              <TextInput
+                id={id}
+                name="occurredOn"
+                type="date"
+                defaultValue={data.date}
+                max={data.maxDate}
+                required
+                describedBy={describedBy}
+              />
+            )}
+          </Field>
 
-        <Field label="Category">
-          {({ id, describedBy }) => (
-            <Select id={id} name="categoryId" defaultValue={data.categoryId} describedBy={describedBy}>
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </Select>
-          )}
-        </Field>
+          <Field label="Category">
+            {({ id, describedBy }) => (
+              <Select id={id} name="categoryId" defaultValue={data.categoryId} describedBy={describedBy}>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
 
-        <Field label={isIncome ? "Payer (optional)" : "Merchant (optional)"}>
-          {({ id, describedBy }) => (
-            <TextInput
-              id={id}
-              name="merchantName"
-              defaultValue={data.merchantName}
-              maxLength={120}
-              describedBy={describedBy}
-            />
-          )}
-        </Field>
+          <Field label={isIncome ? "Payer (optional)" : "Merchant (optional)"}>
+            {({ id, describedBy }) => (
+              <TextInput
+                id={id}
+                name="merchantName"
+                defaultValue={data.merchantName}
+                maxLength={120}
+                describedBy={describedBy}
+              />
+            )}
+          </Field>
+        </div>
 
         <Field label="Notes (optional)">
           {({ id, describedBy }) => (

@@ -1,0 +1,76 @@
+/*
+ * One transaction.
+ *
+ * Up to 1200 px the page is a single column and the Details card carries everything, as it always
+ * has. From 1200 px there is a second column, and the accounts, the edit history and the
+ * delete/restore control move into it. Both placements are in the markup; `belowWide` here and the
+ * global `wide-only` pick one, so no width ever shows the same thing twice.
+ */
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.label {
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+}
+
+.value {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+/* A short list that is the whole card (the desktop's sidebar column) ends without a rule under it. */
+.listEnd .row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+/*
+ * With room to spare, a value pushed to the far edge loses its label. The main list becomes two
+ * aligned columns instead; the short lists in the sidebar column keep the phone's spread.
+ */
+@media (min-width: 1024px) {
+  .listWide .row {
+    justify-content: flex-start;
+    gap: var(--space-5);
+  }
+
+  .listWide .label {
+    flex: 0 0 9rem;
+  }
+
+  .listWide .value {
+    text-align: left;
+  }
+}
+
+/*
+ * A wrapper that exists only so something can be hidden later. Until then it has no box of its own,
+ * so the badge or button inside is laid out exactly as if the wrapper were not there.
+ */
+.passThrough {
+  display: contents;
+}
+
+/* Paired with the class it overrides, so hiding never depends on the order of the rules. */
+@media (min-width: 1200px) {
+  .row.belowWide,
+  .passThrough.belowWide {
+    display: none;
+  }
+}
