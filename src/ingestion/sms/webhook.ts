@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
+import { applyTemplates } from "../../extraction/templates.ts";
 import type { Db } from "../../core/data/driver.ts";
 import { asText } from "../../core/data/driver.ts";
 import { FinanceError, FinanceErrorCode, validationError } from "../../core/domain/errors.ts";
@@ -271,6 +272,18 @@ export type StageOutcome = {
  * so the same staging path can serve a future file import. The whole thing runs in one transaction:
  * a delivery either records the sender, the message and nothing else, or records nothing.
  */
+const MONEY_EVENTS: ReadonlySet<string> = new Set(["posted_expense", "posted_income", "refund", "transfer", "fee", "bill", "pending_payment"]);
+
+/** True when the deterministic rules read the text as money moving, with an amount. */
+function looksFinancial(text: string): boolean {
+  try {
+    const result = applyTemplates(text);
+    return result.eventType !== null && MONEY_EVENTS.has(result.eventType) && result.amountText.value !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function stageWebhookMessage(
   db: Db,
   config: WebhookConfig,
@@ -308,9 +321,23 @@ export function stageWebhookMessage(
          last_seen_at = MAX(COALESCE(source_senders.last_seen_at, 0), excluded.last_seen_at)`,
     ).run(connectionId, payload.from, payload.from, receivedAt, receivedAt);
 
-    const enabled = db
-      .prepare("SELECT 1 AS ok FROM source_senders WHERE connection_id = ? AND sender_key = ? AND enabled = 1")
-      .get(connectionId, payload.from);
+    const sender = db
+      .prepare("SELECT enabled, owner_blocked FROM source_senders WHERE connection_id = ? AND sender_key = ?")
+      .get(connectionId, payload.from) as Record<string, unknown>;
+    let enabled = Number(sender.enabled) === 1;
+
+    /*
+     * A sender is switched on by its own first financial message. Requiring the owner to find each
+     * bank in Settings and press Keep first meant every message before that was discarded on
+     * arrival, silently — which in practice was all of them. The rules decide, locally and in
+     * microseconds: a message that states money moving (with an amount) is kept and its sender
+     * enabled; an OTP, a promotion or a personal text matches nothing and is still never stored
+     * (buildspec.md §18). A sender the owner pressed Stop on stays stopped.
+     */
+    if (!enabled && Number(sender.owner_blocked) !== 1 && looksFinancial(payload.text)) {
+      db.prepare("UPDATE source_senders SET enabled = 1 WHERE connection_id = ? AND sender_key = ?").run(connectionId, payload.from);
+      enabled = true;
+    }
     if (!enabled) return { staged: false, reason: "sender_not_enabled", connectionId };
 
     const already = db

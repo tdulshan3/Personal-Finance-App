@@ -116,8 +116,9 @@ export async function toggleSenderAction(formData: FormData): Promise<void> {
   if (!connection) return;
 
   handle
-    .prepare("UPDATE source_senders SET enabled = ? WHERE connection_id = ? AND sender_key = ?")
-    .run(enabled ? 1 : 0, asText(connection.id, "id"), senderKey);
+    // Stop is remembered as the owner's decision, so a later financial message cannot undo it.
+    .prepare("UPDATE source_senders SET enabled = ?, owner_blocked = ? WHERE connection_id = ? AND sender_key = ?")
+    .run(enabled ? 1 : 0, enabled ? 0 : 1, asText(connection.id, "id"), senderKey);
 
   revalidatePath("/settings");
 }

@@ -195,8 +195,10 @@ export function SmsCard({ overview, webhookUrl }: { overview: SmsOverview; webho
 
         {overview.senders.length === 0 ? (
           <p style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
-            No messages have arrived yet. Once the collector is running, senders appear here and you
-            choose which ones are financial. Until you do, no message text is stored.
+            No messages have arrived yet. A sender switches on by itself the first time it sends
+            something financial (a debit, a credit, a bill), and that message goes to Review. One-time
+            codes, offers and personal texts are never stored. Press Stop on any sender to silence it
+            for good.
           </p>
         ) : (
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "var(--space-3)" }}>
