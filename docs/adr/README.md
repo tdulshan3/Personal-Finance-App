@@ -19,13 +19,10 @@ ADR spells out which.
 | [0006](0006-money-as-bigint-minor-units.md) | Money as `bigint` minor units, decimal strings on the wire | — (implements §9.1, §16) |
 | [0007](0007-http-session-auth-for-the-phone-server.md) | Unlocking is authentication: one passphrase, an in-memory session token, loopback by default | §3 (the "no HTTP server" rule), fills §16/§18 |
 | [0008](0008-bind-the-ledger-to-the-lan.md) | Bound to the LAN by owner choice, accepting a cleartext passphrase until TLS lands | amends 0007 |
+| [0009](0009-assistant-rules-first-and-proposal-boundary.md) | Assistant answers by rules first; the model can only draft proposals, and only the owner's Confirm executes one | §14.1 tool calling, §14.4 60 s turn |
 
 ## Known conflicts without an ADR yet
 
-- **§14.1 agent model discovery** still specifies Ollama's `/api/tags` and native tool calling, and
-  §16 maps `ModelService.listAgentModels` onto it. If the agent endpoint is also llama.cpp, it needs
-  the same treatment as [ADR 0005](0005-llama-cpp-openai-endpoint-instead-of-ollama.md), plus a
-  decision about tool calling. Needed before M6.
 - **§21 M7's "signed installable Android package"** has no equivalent here. What replaces it as a
   release gate is sketched in [../milestones.md](../milestones.md) but not decided.
 - **§6 Gmail authorization.** §6 assumes Android's identity library, which does not apply to a Node

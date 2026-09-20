@@ -603,11 +603,69 @@ const MIGRATION_004 = /* sql */ `
 ALTER TABLE ledger_accounts ADD COLUMN credit_limit_minor INTEGER;
 `;
 
+/* -------------------------------------------------------------------------------------------- */
+/* 005 — assistant: chat, proposals and approvals (buildspec.md §17.2, §14.3)                     */
+/* -------------------------------------------------------------------------------------------- */
+
+const MIGRATION_005 = /* sql */ `
+CREATE TABLE chat_sessions (
+  id         TEXT PRIMARY KEY,
+  title      TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+-- buildspec.md §17.2: "Redact secrets; distinguish source/tool text from owner instructions."
+CREATE TABLE chat_messages (
+  id                TEXT PRIMARY KEY,
+  session_id        TEXT NOT NULL REFERENCES chat_sessions(id),
+  role              TEXT NOT NULL CHECK (role IN ('owner','assistant','tool','system_note')),
+  content           TEXT NOT NULL,
+  proposal_ids_json TEXT NOT NULL DEFAULT '[]',
+  created_at        INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX idx_chat_messages_session ON chat_messages (session_id, created_at);
+
+-- buildspec.md §14.3: "Write tools create proposals only." A row here is an immutable description
+-- of one exact action. It cannot execute itself, and nothing the model says can approve it.
+CREATE TABLE action_proposals (
+  id                   TEXT PRIMARY KEY,
+  actor_kind           TEXT NOT NULL,
+  session_id           TEXT REFERENCES chat_sessions(id),
+  model_identity_json  TEXT NOT NULL,
+  action_type          TEXT NOT NULL,
+  arguments_json       TEXT NOT NULL,
+  target_versions_json TEXT NOT NULL DEFAULT '{}',
+  preview_json         TEXT NOT NULL,
+  hash                 TEXT NOT NULL,
+  expires_at           INTEGER NOT NULL,
+  status               TEXT NOT NULL DEFAULT 'pending'
+                       CHECK (status IN ('pending','executed','cancelled','expired','stale','failed')),
+  result_json          TEXT,
+  created_at           INTEGER NOT NULL,
+  resolved_at          INTEGER
+) STRICT;
+
+CREATE INDEX idx_proposals_session ON action_proposals (session_id, created_at DESC);
+CREATE INDEX idx_proposals_status ON action_proposals (status, expires_at);
+
+-- buildspec.md §17.2: "Trusted UI only; one-use binding."
+CREATE TABLE approval_receipts (
+  id            TEXT PRIMARY KEY,
+  proposal_id   TEXT NOT NULL UNIQUE REFERENCES action_proposals(id),
+  proposal_hash TEXT NOT NULL,
+  approved_at   INTEGER NOT NULL,
+  consumed_at   INTEGER
+) STRICT;
+`;
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   Object.freeze({ version: 1, name: "ledger-foundation", sql: MIGRATION_001 }),
   Object.freeze({ version: 2, name: "inference-endpoints", sql: MIGRATION_002 }),
   Object.freeze({ version: 3, name: "message-sources-and-jobs", sql: MIGRATION_003 }),
   Object.freeze({ version: 4, name: "credit-limits", sql: MIGRATION_004 }),
+  Object.freeze({ version: 5, name: "assistant-proposals", sql: MIGRATION_005 }),
 ]);
 
 function checksumOf(migration: Migration): string {
