@@ -137,21 +137,28 @@ describe("the happy path", () => {
 });
 
 describe("invented content is rejected", () => {
-  test("rejects an invented merchant", () => {
+  /*
+   * Invented *decoration* is removed, not fatal. A small model reading a real BOC message got the
+   * amount right and then made up a date and an account number; refusing the whole event threw the
+   * correct amount away and the owner was told to type the message in by hand. §7.3's rule still
+   * holds — nothing invented survives — it is just applied per field.
+   */
+  test("drops an invented merchant but keeps the event", () => {
     const result = run([event({ merchant_text: "CARGILLS FOOD CITY" })]);
-    assert.equal(result.ok, false);
-    assert.ok(reasons(result).includes(EvidenceRejection.VALUE_NOT_IN_SOURCE));
-    assert.equal(result.events.length, 0);
+    assert.equal(result.ok, true);
+    assert.equal(result.events.length, 1);
+    assert.equal(result.events[0]!.merchantText, null, "the invention never reaches the ledger");
+    assert.equal(result.events[0]!.amount?.minor, 345000n, "the part that was in the message is kept");
   });
 
-  test("rejects an invented reference", () => {
+  test("drops an invented reference but keeps the event", () => {
     // buildspec.md §7.3: "Reject invented IDs or evidence."
     const result = run([event({ reference_text: "TXN-9914455" })]);
-    assert.equal(result.ok, false);
-    assert.ok(reasons(result).includes(EvidenceRejection.VALUE_NOT_IN_SOURCE));
+    assert.equal(result.ok, true);
+    assert.equal(result.events[0]!.referenceText, null);
   });
 
-  test("rejects evidence that quotes text the message never contained", () => {
+  test("a false quotation for an optional field does not sink the event", () => {
     const result = run([
       event({
         evidence: {
@@ -161,8 +168,27 @@ describe("invented content is rejected", () => {
         },
       }),
     ]);
+    assert.equal(result.ok, true);
+  });
+
+  test("a false quotation for the amount still does", () => {
+    const result = run([event({ evidence: { amount: "Purchase of LKR 9,999.00" } })]);
     assert.equal(result.ok, false);
     assert.ok(reasons(result).includes(EvidenceRejection.EVIDENCE_NOT_IN_SOURCE));
+  });
+
+  test("the real failure: right amount, invented date and account", () => {
+    // Synthetic, in the shape of the message that exposed this.
+    const text = "Online Transfer Debit Rs 75.00 From A/C No XXXXXXXXXX482. Balance available Rs 1,210.40 - Thank you for banking with SAMPLE";
+    const result = run(
+      [event({ amount_text: "75.00", merchant_text: "SAMPLE", account_suffix: "XXXXXXX4", occurred_at_text: "2026-03-20", reference_text: null, balance_text: "1,210.40", balance_type: "available", evidence: { account: "SAMPLE" } })],
+      { sourceText: text },
+    );
+    assert.equal(result.ok, true);
+    const [kept] = result.events;
+    assert.equal(kept!.amount?.minor, 7500n);
+    assert.equal(kept!.accountSuffix, null, "XXXXXXX4 is not a usable suffix");
+    assert.equal(kept!.occurredOn, null, "neither is any date");
   });
 
   test("rejects an amount that is not in the message", () => {
@@ -308,7 +334,7 @@ describe("money and date rules", () => {
     assert.equal(result.events[0]?.occurredOn, "2026-04-03");
   });
 
-  test("rejects an account suffix that is not a short masked number", () => {
+  test("blanks an account suffix that is not a short masked number, and keeps the event", () => {
     const text = "Purchase of LKR 3,450.00 at KEELLS SUPER using card ****4 on 20/09/2026.";
     const result = run(
       [
@@ -321,8 +347,9 @@ describe("money and date rules", () => {
       ],
       { sourceText: text },
     );
-    assert.equal(result.ok, false);
-    assert.deepEqual(new Set(reasons(result)), new Set([EvidenceRejection.ACCOUNT_SUFFIX_INVALID]));
+    // It is only a hint for pre-selecting the account; losing it costs the owner one tap.
+    assert.equal(result.ok, true);
+    assert.equal(result.events[0]!.accountSuffix, null);
   });
 
   test("rejects a suffix long enough to be a full card number at the schema layer", () => {

@@ -22,7 +22,7 @@ import { EventType as Event } from "./schema.ts";
  *     a hostile or malformed message cannot make the parser hang (§7.1, §20).
  */
 
-export const TEMPLATE_ENGINE_VERSION = "rules-v3";
+export const TEMPLATE_ENGINE_VERSION = "rules-v4";
 
 /* -------------------------------------------------------------------------------------------- */
 /* Field patterns                                                                                 */
@@ -181,13 +181,16 @@ const RULES: readonly Rule[] = Object.freeze([
     // Skipped when the message also says "debited" - "debited from your a/c and credited to X" is
     // money leaving, and must fall through to the expense rule below.
     type: Event.POSTED_INCOME,
-    any: [/\bcredited\b/i, /\bcredit of\b/i],
+    // The last form is the noun, as in BOC's "Online Transfer Credit Rs 50.00 To A/C No ...".
+    any: [/\bcredited\b/i, /\bcredit of\b/i, /\bcredit\b(?!\s+(?:card|limit))/i],
     not: [/\bdebited\b/i, /\bcredit (?:card|limit)\b/i],
   },
   {
     type: Event.POSTED_EXPENSE,
     any: [
       /\b(purchase of|debited|debit of|spent|withdrawn|withdrawal|payment of|charged)\b/i,
+      // BOC writes it as a noun: "Online Transfer Debit Rs 50.00 From A/C No ...". Not "debit card".
+      /\bdebit\b(?!\s+card)/i,
       // A biller's own receipt: "Recharge of Rs.50.00 successful", "Reload ... completed". Tied to
       // a success word so "Recharge Rs.100 and get 2GB" stays a promotion, not spending.
       /\b(?:recharge|reload|top-?up|bill payment)\b[\s\S]{0,60}?\b(?:successful(?:ly)?|success|completed|received|done)\b/i,

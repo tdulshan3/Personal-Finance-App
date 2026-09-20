@@ -366,8 +366,48 @@ export function createMessageProcessor(deps: { db: Db; clock: Clock; zone: strin
    * forward at most one state per call and every write is its own transaction, so a crash mid-run
    * leaves whole messages either done or untouched (§20 "crash mid-write").
    */
+  /**
+   * When the rules improve, give them another look at what they could not read before.
+   *
+   * A message that ended up as an "enter it by hand" card stays that way forever otherwise, even
+   * after the phrasing that defeated the rules has been taught to them. Once per rules version —
+   * the version is remembered, so a message that still cannot be read is not retried every minute
+   * — those cards are marked superseded (never deleted: §15 keeps history) and their messages go
+   * back to the start of the queue. Anything the owner already accepted or ignored is untouched.
+   */
+  function requeueAfterRulesUpgrade(): number {
+    const key = "ingestion.requeued_for_rules";
+    const row = db.prepare("SELECT value_json FROM settings WHERE key = ?").get(key) as Record<string, unknown> | undefined;
+    if (row && JSON.parse(asText(row.value_json, "value_json")) === TEMPLATE_ENGINE_VERSION) return 0;
+
+    return db.transaction(() => {
+      const stuck = db.prepare(
+        `SELECT e.id AS event_id, e.source_id AS source_id FROM source_events e
+           JOIN source_messages m ON m.id = e.source_id
+          WHERE e.kind = 'unknown' AND e.status = 'needs_review' AND m.body IS NOT NULL`,
+      ).all() as Record<string, unknown>[];
+      const now = clock.now();
+      for (const item of stuck) {
+        const eventId = asText(item.event_id, "event_id");
+        db.prepare("UPDATE source_events SET status = 'superseded' WHERE id = ?").run(eventId);
+        db.prepare("UPDATE review_items SET status = 'ignored', updated_at = ? WHERE target_type = 'source_event' AND target_id = ? AND status = 'open'").run(now, eventId);
+        db.prepare("UPDATE source_messages SET processing_status = 'staged' WHERE id = ?").run(asText(item.source_id, "source_id"));
+      }
+      db.prepare(
+        `INSERT INTO settings (key, value_json, revision, updated_at) VALUES (?,?,1,?)
+         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+      ).run(key, JSON.stringify(TEMPLATE_ENGINE_VERSION), now);
+      return stuck.length;
+    });
+  }
+
   async function processPending(options: { limit?: number; useModel?: boolean } = {}): Promise<ProcessReport> {
     const limit = options.limit ?? 50;
+    try {
+      requeueAfterRulesUpgrade();
+    } catch {
+      // A failed re-read must never stop new messages from being processed.
+    }
     const rows = (
       db
         .prepare(
@@ -388,7 +428,9 @@ export function createMessageProcessor(deps: { db: Db; clock: Clock; zone: strin
 
     for (const row of rows) {
       try {
-        let result: string = row.status === "needs_model" ? "model" : processWithRules(row);
+        // The rules always go first, including for a message that was parked for the model: they
+        // cost microseconds, and they may have learned its phrasing since it was parked.
+        let result: string = processWithRules(row);
         if (result === "model") {
           if (!endpoint) {
             setStatus(row.id, "needs_model");

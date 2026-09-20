@@ -45,6 +45,10 @@ test("writes are noticed without being announced, including while nobody listene
   assert.ok(await waitFor(() => events.some((e) => e.type === "change")), "a change event follows a write");
   const afterFirst = liveSnapshot().version;
 
+  // Let start-up finish first: the background reader makes one legitimate write about 1.5 s after
+  // unlock (it remembers which rules version it last re-read for).
+  await new Promise((resolve) => setTimeout(resolve, 2_600));
+
   // A quiet ledger stays quiet: no events for reads.
   const quietCount = events.length;
   service.listAccounts();

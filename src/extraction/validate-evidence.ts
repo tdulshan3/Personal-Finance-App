@@ -363,13 +363,36 @@ function problem(
 }
 
 function validateEvent(
-  raw: ExtractionEvent,
+  original: ExtractionEvent,
   index: number,
   haystacks: readonly Haystack[],
   input: EvidenceValidationInput,
 ): EventOutcome {
   const problems: EvidenceProblem[] = [];
   const notes: string[] = [];
+
+  /*
+   * Invented decoration is dropped, not fatal.
+   *
+   * A small model reading "Debit Rs 75.00 From A/C No XXXXXXXXXX482" will often get the amount
+   * right and then supply a date or an account number that is nowhere in the text. Rejecting the
+   * whole event for that threw away the correct amount too, and the owner was told to type the
+   * message in by hand. The rule that matters is unchanged — nothing invented may reach the ledger
+   * (buildspec.md §7.3) — so an optional field that cannot be found in the source is simply blanked
+   * and the fact recorded. The amount is not optional: if *that* is not in the message, the event
+   * is still refused.
+   */
+  const optional = ["merchant_text", "account_suffix", "occurred_at_text", "reference_text", "balance_text"] as const;
+  const cleaned: Record<string, unknown> = { ...original };
+  for (const key of optional) {
+    const value = original[key];
+    if (typeof value === "string" && value.length > 0 && !appearsInSource(haystacks, value)) {
+      cleaned[key] = null;
+      if (key === "balance_text") cleaned.balance_type = null;
+      notes.push(`dropped_invented:${key}`);
+    }
+  }
+  const raw = cleaned as ExtractionEvent;
 
   if (!(EVENT_TYPES as readonly string[]).includes(raw.event_type)) {
     problems.push(
@@ -387,6 +410,11 @@ function validateEvent(
    */
   for (const field of EVIDENCE_FIELDS) {
     const quoted = evidenceValue(raw.evidence, field);
+    // A bad quotation only discredits the field it was offered for; only the amount's is fatal.
+    if (quoted !== null && !appearsInSource(haystacks, quoted) && !String(field).includes("amount")) {
+      notes.push(`dropped_invented:evidence.${String(field)}`);
+      continue;
+    }
     if (quoted !== null && !appearsInSource(haystacks, quoted)) {
       problems.push(
         problem(
@@ -517,14 +545,9 @@ function validateEvent(
   if (raw.account_suffix !== null) {
     const trimmed = raw.account_suffix.replace(/[\s*x#-]/giu, "");
     if (!ACCOUNT_SUFFIX_PATTERN.test(trimmed)) {
-      problems.push(
-        problem(
-          index,
-          "account_suffix",
-          EvidenceRejection.ACCOUNT_SUFFIX_INVALID,
-          `'${raw.account_suffix}' is not a 2-8 digit masked suffix`,
-        ),
-      );
+      // An unusable account hint costs the owner one tap to choose the account. Refusing the
+      // whole event over it cost them the amount as well. It is a hint, so it is blanked.
+      notes.push("dropped_unusable:account_suffix");
     } else {
       accountSuffix = trimmed;
     }
