@@ -61,6 +61,7 @@ die() { printf '%s\n' "$*" >&2; exit 1; }
 
 [ -d "$APP_DIR" ] || die "No app at $APP_DIR. Deploy it first: npm run deploy:s20"
 [ -f "$APP_DIR/server.js" ] || die "$APP_DIR has no server.js. The standalone build did not arrive."
+[ -f "$APP_DIR/start.js" ] || die "$APP_DIR has no start.js. Copy scripts/phone/start.js beside server.js."
 
 mkdir -p "$DATA_DIR" "$LOG_DIR"
 
@@ -93,6 +94,6 @@ fi
 # Four threads is the right number on a Snapdragon 865 for anything CPU-bound alongside the model
 # servers; core 0 is left for everything else, matching what tune.sh does for llama.cpp.
 if command -v taskset >/dev/null 2>&1; then
-  exec taskset -c 1-3 node server.js 2>&1 | tee -a "$LOG_DIR/finance.log"
+  exec taskset -c 1-3 node start.js 2>&1 | tee -a "$LOG_DIR/finance.log"
 fi
-exec node server.js 2>&1 | tee -a "$LOG_DIR/finance.log"
+exec node start.js 2>&1 | tee -a "$LOG_DIR/finance.log"
