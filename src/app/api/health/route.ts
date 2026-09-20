@@ -70,6 +70,47 @@ export async function GET(): Promise<Response> {
     }
   }
 
+  if (!locked && isInitialised()) {
+    /*
+     * The capture pipeline, as counts. This is what answers "why did nothing arrive?" without
+     * anyone reading a message: did deliveries come in, were their senders on, did the rules or the
+     * model get through them, is anything waiting. Still no amounts, sender names or text.
+     */
+    try {
+      const db = requireDb();
+      const one = (sql: string) => Number((db.prepare(sql).get() as Record<string, unknown> | undefined)?.n ?? 0);
+      const byStatus: Record<string, number> = {};
+      for (const row of db.prepare("SELECT processing_status AS s, COUNT(*) AS n FROM source_messages GROUP BY processing_status").all() as Record<string, unknown>[]) {
+        byStatus[String(row.s)] = Number(row.n);
+      }
+      const webhook = db.prepare("SELECT value_json FROM settings WHERE key LIKE '%webhook%' LIMIT 1").get() as Record<string, unknown> | undefined;
+      let lastDeliveryAt: string | null = null;
+      let enabled: boolean | null = null;
+      if (webhook) {
+        const parsed = JSON.parse(String(webhook.value_json)) as { lastDeliveryAt?: number; enabled?: boolean };
+        lastDeliveryAt = parsed.lastDeliveryAt ? new Date(parsed.lastDeliveryAt).toISOString() : null;
+        enabled = parsed.enabled ?? null;
+      }
+      const model = db.prepare("SELECT model_name, last_test_ok FROM ai_endpoints WHERE role = 'extraction'").get() as Record<string, unknown> | undefined;
+      body.pipeline = {
+        webhookConfigured: webhook !== undefined,
+        webhookEnabled: enabled,
+        lastDeliveryAt,
+        sendersSeen: one("SELECT COUNT(*) AS n FROM source_senders"),
+        sendersOn: one("SELECT COUNT(*) AS n FROM source_senders WHERE enabled = 1"),
+        sendersStoppedByOwner: one("SELECT COUNT(*) AS n FROM source_senders WHERE owner_blocked = 1"),
+        deliveriesSeen: one("SELECT COALESCE(SUM(seen_count), 0) AS n FROM source_senders"),
+        messagesKept: one("SELECT COUNT(*) AS n FROM source_messages"),
+        messagesByStatus: byStatus,
+        waitingForReview: one("SELECT COUNT(*) AS n FROM source_events WHERE status = 'needs_review'"),
+        extractionModelSet: Boolean(model && model.model_name !== null),
+        extractionModelLastTestOk: model ? (model.last_test_ok === null ? null : Number(model.last_test_ok) === 1) : null,
+      };
+    } catch (error) {
+      body.pipeline = { error: error instanceof Error ? error.message.slice(0, 120) : "unavailable" };
+    }
+  }
+
   return Response.json(body, {
     status: 200,
     headers: {

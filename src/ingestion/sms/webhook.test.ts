@@ -209,27 +209,58 @@ describe("staging a delivery", () => {
   }
 
   // buildspec.md §18: until the owner marks a sender financial, no message body is stored.
-  test("an unknown sender is recorded by name only, with no body kept", async () => {
+  const CHATTER = { ...PAYLOAD, from: "SomeShop", text: "482913 is your OTP. Do not share it with anyone." };
+
+  test("a non-financial message from an unknown sender is recorded by name only, with no body kept", async () => {
     const { db, config } = await ready();
-    const outcome = stageWebhookMessage(db, config, parseWebhookPayload(PAYLOAD), Date.now());
+    const outcome = stageWebhookMessage(db, config, parseWebhookPayload(CHATTER), Date.now());
 
     assert.equal(outcome.staged, false);
     assert.equal(outcome.reason, "sender_not_enabled");
 
     const bodies = db.prepare("SELECT COUNT(*) AS n FROM source_messages").get() as Record<string, unknown>;
-    assert.equal(Number(bodies.n), 0, "no message body may be stored before the owner opts in");
+    assert.equal(Number(bodies.n), 0, "an OTP, a promotion or a personal text is never stored (§18)");
 
     const senders = db.prepare("SELECT sender_key, seen_count, enabled FROM source_senders").all() as Record<string, unknown>[];
     assert.equal(senders.length, 1);
-    assert.equal(senders[0]!.sender_key, "BlueLagoonBank");
+    assert.equal(senders[0]!.sender_key, "SomeShop");
     assert.equal(Number(senders[0]!.enabled), 0);
+    db.close();
+  });
+
+  /*
+   * The regression this replaces: a bank's messages were discarded on arrival until the owner found
+   * the sender in Settings and pressed Keep, so in practice nothing ever reached review.
+   */
+  test("a sender's first financial message switches it on and is kept", async () => {
+    const { db, config } = await ready();
+    const outcome = stageWebhookMessage(db, config, parseWebhookPayload(PAYLOAD), Date.now());
+    assert.equal(outcome.staged, true, "no trip to Settings needed");
+
+    const sender = db.prepare("SELECT enabled FROM source_senders").get() as Record<string, unknown>;
+    assert.equal(Number(sender.enabled), 1);
+    const row = db.prepare("SELECT body FROM source_messages").get() as Record<string, unknown>;
+    assert.match(String(row.body), /KEELLS SUPER/);
+    db.close();
+  });
+
+  test("a sender the owner stopped stays stopped, whatever it sends", async () => {
+    const { db, config } = await ready();
+    stageWebhookMessage(db, config, parseWebhookPayload(PAYLOAD), Date.now());
+    db.prepare("UPDATE source_senders SET enabled = 0, owner_blocked = 1").run();
+
+    const outcome = stageWebhookMessage(db, config, parseWebhookPayload({ ...PAYLOAD, sentStamp: PAYLOAD.sentStamp + 9000 }), Date.now());
+    assert.equal(outcome.staged, false);
+    assert.equal(outcome.reason, "sender_not_enabled");
+    const count = db.prepare("SELECT COUNT(*) AS n FROM source_messages").get() as Record<string, unknown>;
+    assert.equal(Number(count.n), 1, "only the message from before the Stop");
     db.close();
   });
 
   test("counts keep rising for a sender that is not enabled", async () => {
     const { db, config } = await ready();
     for (let i = 0; i < 3; i += 1) {
-      stageWebhookMessage(db, config, parseWebhookPayload({ ...PAYLOAD, sentStamp: PAYLOAD.sentStamp + i }), Date.now());
+      stageWebhookMessage(db, config, parseWebhookPayload({ ...CHATTER, sentStamp: PAYLOAD.sentStamp + i }), Date.now());
     }
     const row = db.prepare("SELECT seen_count FROM source_senders").get() as Record<string, unknown>;
     assert.equal(Number(row.seen_count), 3, "the owner should see how often a sender writes");
@@ -238,9 +269,6 @@ describe("staging a delivery", () => {
 
   test("once the sender is enabled the message is staged", async () => {
     const { db, config } = await ready();
-    stageWebhookMessage(db, config, parseWebhookPayload(PAYLOAD), Date.now());
-    db.prepare("UPDATE source_senders SET enabled = 1").run();
-
     const outcome = stageWebhookMessage(db, config, parseWebhookPayload(PAYLOAD), Date.now());
     assert.equal(outcome.staged, true);
 
@@ -257,8 +285,6 @@ describe("staging a delivery", () => {
    */
   test("ten retries of one message stage it exactly once", async () => {
     const { db, config } = await ready();
-    stageWebhookMessage(db, config, parseWebhookPayload(PAYLOAD), Date.now());
-    db.prepare("UPDATE source_senders SET enabled = 1").run();
 
     let staged = 0;
     for (let i = 0; i < 10; i += 1) {

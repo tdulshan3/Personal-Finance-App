@@ -66,7 +66,27 @@ const newId = (prefix: string) => `${prefix}_${randomUUID().replace(/-/g, "").sl
 export function createReviewService(deps: { db: Db; service: FinanceService }) {
   const { db, service } = deps;
 
-  function suggestAccount(hint: string | null): string | null {
+  /**
+   * Which account a message is about: the masked number in its text when it has one, otherwise
+   * the account this sender was last recorded against. A bank's sender name is one bank, so
+   * "BOC" pre-selects the BOC account even for a message that quotes no account number.
+   */
+  function suggestAccount(hint: string | null, sender?: string): string | null {
+    return suggestBySuffix(hint) ?? (sender ? suggestBySender(sender) : null);
+  }
+
+  function suggestBySender(sender: string): string | null {
+    const row = db
+      .prepare(
+        `SELECT s.default_account_id AS id FROM source_senders s
+           JOIN ledger_accounts l ON l.id = s.default_account_id
+          WHERE s.sender_key = ? AND l.archived_at IS NULL LIMIT 1`,
+      )
+      .get(sender) as Record<string, unknown> | undefined;
+    return row ? asText(row.id, "id") : null;
+  }
+
+  function suggestBySuffix(hint: string | null): string | null {
     if (!hint) return null;
     const rows = db
       .prepare(
@@ -212,11 +232,11 @@ export function createReviewService(deps: { db: Db; service: FinanceService }) {
         flags: candidate.flags ?? [],
         engine: asText(row.engine, "engine") as "rules" | "model",
         modelName: asOptionalText(row.model_name, "model_name") ?? null,
-        suggestedAccountId: suggestAccount(hint),
+        suggestedAccountId: suggestAccount(hint, asText(row.sender, "sender")),
         suggestedCategoryId: suggestCategory(merchant),
         possibleDuplicate: findPossibleDuplicate(amount, occurredOn),
         pairedWith: null,
-        balanceCheck: projectBalance(suggestAccount(hint), kind, amount, candidate.balanceText ?? null),
+        balanceCheck: projectBalance(suggestAccount(hint, asText(row.sender, "sender")), kind, amount, candidate.balanceText ?? null),
       };
     });
     return pairUp(cards, keepApart);
@@ -261,7 +281,7 @@ export function createReviewService(deps: { db: Db; service: FinanceService }) {
   }): { transactionId: string } {
     const event = db
       .prepare(
-        `SELECT e.id, e.status, e.account_hint, e.source_id, e.candidate_json, m.received_at
+        `SELECT e.id, e.status, e.account_hint, e.source_id, e.candidate_json, m.received_at, m.sender
            FROM source_events e JOIN source_messages m ON m.id = e.source_id WHERE e.id = ?`,
       )
       .get(input.eventId) as Record<string, unknown> | undefined;
@@ -305,6 +325,12 @@ export function createReviewService(deps: { db: Db; service: FinanceService }) {
       ).run(newId("tsrc"), result.transactionId, input.eventId, result.actionId, service.clock.now());
 
       resolve(input.eventId, "accepted", result.actionId);
+
+      // Remember which account this sender means, so its next message arrives with it chosen.
+      // Only a message that names an account (a bank's) teaches this; a biller's receipt does not.
+      if (input.rememberAccount !== false && asOptionalText(event.account_hint, "account_hint")) {
+        db.prepare("UPDATE source_senders SET default_account_id = ? WHERE sender_key = ?").run(input.accountId, asText(event.sender, "sender"));
+      }
 
       // Keep what the bank said the balance was. It changes nothing; it is what the books are
       // checked against afterwards (buildspec.md §17.1: observations are appended, never applied).

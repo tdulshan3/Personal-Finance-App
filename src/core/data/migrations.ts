@@ -670,6 +670,13 @@ CREATE TABLE account_payment_terms (
 ) STRICT;
 `;
 
+const MIGRATION_007 = /* sql */ `
+-- A sender the owner pressed Stop on must stay stopped, even though financial messages now switch
+-- a sender on by themselves; and a sender that is one bank can name the account it reports on.
+ALTER TABLE source_senders ADD COLUMN owner_blocked INTEGER NOT NULL DEFAULT 0 CHECK (owner_blocked IN (0,1));
+ALTER TABLE source_senders ADD COLUMN default_account_id TEXT REFERENCES ledger_accounts(id);
+`;
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   Object.freeze({ version: 1, name: "ledger-foundation", sql: MIGRATION_001 }),
   Object.freeze({ version: 2, name: "inference-endpoints", sql: MIGRATION_002 }),
@@ -677,6 +684,7 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
   Object.freeze({ version: 4, name: "credit-limits", sql: MIGRATION_004 }),
   Object.freeze({ version: 5, name: "assistant-proposals", sql: MIGRATION_005 }),
   Object.freeze({ version: 6, name: "card-payment-terms", sql: MIGRATION_006 }),
+  Object.freeze({ version: 7, name: "sender-auto-keep-and-account", sql: MIGRATION_007 }),
 ]);
 
 function checksumOf(migration: Migration): string {

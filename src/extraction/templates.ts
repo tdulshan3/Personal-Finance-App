@@ -22,7 +22,7 @@ import { EventType as Event } from "./schema.ts";
  *     a hostile or malformed message cannot make the parser hang (§7.1, §20).
  */
 
-export const TEMPLATE_ENGINE_VERSION = "rules-v2";
+export const TEMPLATE_ENGINE_VERSION = "rules-v3";
 
 /* -------------------------------------------------------------------------------------------- */
 /* Field patterns                                                                                 */
@@ -57,7 +57,7 @@ const AMOUNT_WITH_CURRENCY =
 
 /** A masked account or card tail: `****1234`, `xxxx1234`, `...1234`, `ending 1234`. */
 const ACCOUNT_SUFFIX =
-  /(?:\*{2,6}|x{2,6}|X{2,6}|\.{3}|ending(?:\s+in)?\s+|no\.?\s?)([0-9]{3,6})\b/;
+  /(?:\*{2,6}|x{2,6}|X{2,6}|\.{3}|ending(?:\s+in)?\s+|no\.?\s?|\b(?:a\/c|acct?|account)\s+)([0-9]{3,6})\b/;
 
 /** `20/09/2026`, `2026/09/14`, `14-03-2026`, `20.09.2026`. */
 const NUMERIC_DATE = /\b(\d{1,4}[/\-.]\d{1,2}[/\-.]\d{2,4})\b/;
@@ -73,7 +73,7 @@ const NAMED_DATE =
  * balance explicitly is what lets the transaction amount be chosen safely from what is left.
  */
 const BALANCE_LEAD =
-  /(?:\b(?:available balance|avail\.? bal|current balance|closing balance|balance)\b|ශේෂය|இருப்பு)/i;
+  /(?:\b(?:available balance|avail(?:able)?\.? bal|avl\.? ?bal(?:ance)?|a\/c bal|acc(?:oun)?t\.? bal(?:ance)?|current balance|closing balance|balance|bal)\b|ශේෂය|இருப்பு)/i;
 
 /*
  * How far back to look for that phrase. A real message puts a clause between the word "balance"
@@ -175,6 +175,14 @@ const RULES: readonly Rule[] = Object.freeze([
       /බැර කර|වැටුප/u,
       /வரவு|சம்பளம்/u,
     ],
+  },
+  {
+    // "is credited with", "credited by", "has credited": any crediting of the owner's account.
+    // Skipped when the message also says "debited" - "debited from your a/c and credited to X" is
+    // money leaving, and must fall through to the expense rule below.
+    type: Event.POSTED_INCOME,
+    any: [/\bcredited\b/i, /\bcredit of\b/i],
+    not: [/\bdebited\b/i, /\bcredit (?:card|limit)\b/i],
   },
   {
     type: Event.POSTED_EXPENSE,
