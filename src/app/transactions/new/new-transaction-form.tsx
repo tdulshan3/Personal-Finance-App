@@ -1,9 +1,9 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { startTransition, useActionState, useMemo, useState } from "react";
 
 import { ErrorNote } from "../../../ui/primitives.tsx";
-import { Field, FormRow, MoneyInput, Select, SubmitButton, TextInput } from "../../../ui/form.tsx";
+import { Button, Field, FormRow, MoneyInput, Select, TextInput } from "../../../ui/form.tsx";
 import type { ActionState } from "../../actions.ts";
 import { createTransactionAction } from "../../actions.ts";
 
@@ -25,7 +25,7 @@ export function NewTransactionForm({
   categories: readonly { id: string; name: string }[];
   today: string;
 }) {
-  const [state, formAction] = useActionState<ActionState, FormData>(createTransactionAction, {});
+  const [state, formAction, isPending] = useActionState<ActionState, FormData>(createTransactionAction, {});
   const [kind, setKind] = useState<string>("expense");
   const [accountId, setAccountId] = useState<string>(accounts[0]?.id ?? "");
 
@@ -44,7 +44,20 @@ export function NewTransactionForm({
   const showCategory = kind !== "transfer";
 
   return (
-    <form action={formAction}>
+    /*
+     * Submitted from `onSubmit` rather than `action={...}` on purpose. React 19 resets a form once
+     * its action settles, even when the action only returned a validation error. That wipes what
+     * was typed and snaps a controlled select back to its first option while state still holds the
+     * old choice, so the retry could post against a different account than the one on screen.
+     */
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (isPending) return;
+        const formData = new FormData(event.currentTarget);
+        startTransition(() => formAction(formData));
+      }}
+    >
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <FormRow>
         <Field label="Type">
@@ -179,7 +192,9 @@ export function NewTransactionForm({
 
         {state.error ? <ErrorNote>{state.error}</ErrorNote> : null}
 
-        <SubmitButton pendingLabel="Saving…">Save transaction</SubmitButton>
+        <Button disabled={isPending} aria-busy={isPending}>
+          {isPending ? "Saving…" : "Save transaction"}
+        </Button>
       </FormRow>
     </form>
   );
