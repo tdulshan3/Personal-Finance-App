@@ -1,0 +1,31 @@
+{
+  "id": "sms_transfer_credit_noun",
+  "language": "en",
+  "channel": "sms",
+  "sender": "Sample Bank (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "Online Transfer Credit Rs 6,500.00 To A/C No XXXXXXXXXX482. Balance available Rs 7,710.40 - Thank you for banking with SAMPLE",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_transfer_credit_noun",
+    "events": [
+      {
+        "event_type": "posted_income",
+        "amount_text": "6,500.00",
+        "currency": "LKR",
+        "merchant_text": null,
+        "account_suffix": "482",
+        "occurred_at_text": null,
+        "reference_text": null,
+        "balance_text": "7,710.40",
+        "balance_type": "available",
+        "evidence": {
+          "amount": "Credit Rs 6,500.00",
+          "account": "A/C No XXXXXXXXXX482"
+        }
+      }
+    ]
+  },
+  "notes": "The mirror of sms_transfer_debit_noun: money arriving, in the same template. 'Credit' as a noun must not be confused with 'credit card' or 'credit limit'.",
+  "synthetic": true
+}

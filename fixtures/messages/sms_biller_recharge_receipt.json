@@ -1,0 +1,30 @@
+{
+  "id": "sms_biller_recharge_receipt",
+  "language": "en",
+  "channel": "sms",
+  "sender": "Sample Telco (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "Recharge of Rs.75.00 successful for 0711234567. Thank you for using SampleTel.",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_biller_recharge",
+    "events": [
+      {
+        "event_type": "posted_expense",
+        "amount_text": "75.00",
+        "currency": "LKR",
+        "merchant_text": "SampleTel",
+        "account_suffix": null,
+        "occurred_at_text": null,
+        "reference_text": null,
+        "balance_text": null,
+        "balance_type": null,
+        "evidence": {
+          "amount": "Recharge of Rs.75.00"
+        }
+      }
+    ]
+  },
+  "notes": "A biller's own receipt for a bill paid from a bank account. The bank sends its own debit message for the same payment; §8 pairs the two into one transaction, so this message names what the money was for and never the account it came from. 0711234567 is a phone number, not an account suffix.",
+  "synthetic": true
+}

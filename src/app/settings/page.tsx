@@ -61,14 +61,15 @@ export default async function SettingsPage() {
             role={EndpointRole.EXTRACTION}
             title="Extraction model"
             blurb={
-              "Reads financial messages into structured data. Runs once per message that the " +
-              "deterministic sender templates cannot handle, so speed matters more here than anywhere else."
+              "Reads financial messages into structured data. The sender templates settle almost every " +
+              "message on their own, so this runs only on the few they cannot: choose the model on this " +
+              "phone and capture keeps working with the PC switched off, at about 20 seconds a message."
             }
             current={serialise(extraction)}
             recentTests={settings.recentTests(EndpointRole.EXTRACTION, 3).map(serialiseTest)}
             suggestions={[
-              { label: "Ollama on the PC", url: "http://192.168.1.84:11434" },
-              { label: "llama.cpp host", url: "http://192.168.1.118:8081" },
+              { label: "This phone (always on)", url: "http://192.168.1.118:8081/v1" },
+              { label: "Ollama on the PC (faster)", url: "http://192.168.1.84:11434" },
             ]}
           />
 
@@ -77,13 +78,14 @@ export default async function SettingsPage() {
             title="Assistant model"
             blurb={
               "Answers questions and proposes changes. It never writes to the ledger directly — every " +
-              "change it suggests needs your confirmation first."
+              "change it suggests needs your confirmation first. This one has to call tools, which the " +
+              "small model on this phone cannot do; use a 2B or larger model on the PC."
             }
             current={serialise(agent)}
             recentTests={settings.recentTests(EndpointRole.AGENT, 3).map(serialiseTest)}
             suggestions={[
               { label: "Ollama on the PC", url: "http://192.168.1.84:11434" },
-              { label: "llama.cpp host", url: "http://192.168.1.118:8081" },
+              { label: "This phone (no tool calling)", url: "http://192.168.1.118:8081/v1" },
             ]}
           />
 

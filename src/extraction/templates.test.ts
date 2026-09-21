@@ -182,9 +182,9 @@ describe("corpus coverage", () => {
    * This is the number that decides how much work the model does at all. Every message the rules
    * settle is one that never waits 2.4 s (PC, on the LAN) or 14-57 s (the phone's own llama.cpp).
    */
-  test("the rules settle at least 12 of the 14 labelled fixtures without the model", () => {
+  test("the rules settle at least 15 of the 17 labelled fixtures without the model", () => {
     const fixtures = loadFixtures();
-    assert.equal(fixtures.length, 14, "the corpus should still have 14 labelled fixtures");
+    assert.equal(fixtures.length, 17, "the corpus should still have 17 labelled fixtures");
 
     let classified = 0;
     let settled = 0;
@@ -198,8 +198,10 @@ describe("corpus coverage", () => {
     }
 
     const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
-    assert.ok(classified >= 13, `classified ${classified}/14`);
-    assert.ok(settled >= 12, `settled ${settled}/14 without the model`);
+    // The one that still needs the model is the ATM withdrawal with a fee: cash moving between the
+    // owner's own accounts, which reads as an expense until something weighs the fee against it.
+    assert.ok(classified >= 16, `classified ${classified}/17`);
+    assert.ok(settled >= 15, `settled ${settled}/17 without the model`);
     assert.ok(elapsedMs < 100, `the whole corpus took ${elapsedMs.toFixed(1)}ms`);
   });
 });

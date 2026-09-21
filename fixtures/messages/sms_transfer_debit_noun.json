@@ -1,0 +1,31 @@
+{
+  "id": "sms_transfer_debit_noun",
+  "language": "en",
+  "channel": "sms",
+  "sender": "Sample Bank (invented)",
+  "as_of": "2026-09-21T09:00:00+05:30",
+  "source_text": "Online Transfer Debit Rs 75.00 From A/C No XXXXXXXXXX482. Balance available Rs 1,210.40 - Thank you for banking with SAMPLE",
+  "expected": {
+    "schema_version": 1,
+    "source_id": "src_fx_transfer_debit_noun",
+    "events": [
+      {
+        "event_type": "posted_expense",
+        "amount_text": "75.00",
+        "currency": "LKR",
+        "merchant_text": null,
+        "account_suffix": "482",
+        "occurred_at_text": null,
+        "reference_text": null,
+        "balance_text": "1,210.40",
+        "balance_type": "available",
+        "evidence": {
+          "amount": "Debit Rs 75.00",
+          "account": "A/C No XXXXXXXXXX482"
+        }
+      }
+    ]
+  },
+  "notes": "The shape that exposed two faults on 2026-09-21. 'Debit' is a noun here, which the rules did not read as an event type; and the message carries no date and no merchant, which a small model fills in by inventing them. Written from a real message with every figure replaced.",
+  "synthetic": true
+}
