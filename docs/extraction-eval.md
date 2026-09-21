@@ -14,10 +14,12 @@ or the prompt changes. This file records what has actually been measured.
 | Model | `qwen3.5-0.8b`, GGUF `Q4_0`, 752,393,024 params, `n_ctx` 65,536 |
 | Digest | **Not reported by this host** — `/v1/models` returns an empty `digest` |
 | Settings | `temperature: 0`, `max_tokens: 1024`, `chat_template_kwargs: {enable_thinking: false}` |
-| Corpus | The 14 labelled fixtures in [`fixtures/messages/`](../fixtures/messages) — all invented |
-| Date | 2026-09-20 |
+| Corpus | The 17 labelled fixtures in [`fixtures/messages/`](../fixtures/messages) — all invented |
+| Date | 2026-09-20, re-measured on 17 fixtures 2026-09-21 |
 
-The corpus is small and English-heavy (11 English, 2 Sinhala, 1 Tamil). **These numbers are a
+The corpus is small and English-heavy (14 English, 2 Sinhala, 1 Tamil). Three of the fixtures are
+the shapes that actually failed in use — a transfer debit written with "Debit" as a noun, its credit
+mirror, and a biller's recharge receipt — with every figure replaced. **These numbers are a
 signal, not a release gate.** §22 sets a provisional target of 99.5% precision for auto-post-eligible
 events on a representative held-out set; this corpus is nowhere near large enough to support that
 claim, and nothing auto-posts today.
@@ -27,17 +29,17 @@ claim, and nothing auto-posts today.
 buildspec.md §7.1 puts deterministic parsing first, and on this hardware that is not a stylistic
 preference — it is what makes ingestion usable at all.
 
-`src/extraction/templates.ts` run over the same 14 fixtures:
+`src/extraction/templates.ts` run over the same 17 fixtures (2026-09-21):
 
 | | Rules | Ollama `qwen3.5:2b` | llama.cpp `qwen3.5-0.8b` |
 |---|---|---|---|
-| `event_type` | **13/14** | 13/14 | 11/14 |
-| Amount exact | 10/11 | 10/11 (parses) | 10/11 (parses) |
-| Settled with no model call | **13/14** | — | — |
-| Time for all 14 | **6.1 ms** | ~34 s | ~5.5 min |
+| `event_type` | **16/17** | 13/14 (of 14) | 13/17 |
+| Amount exact | 13/14 | 10/11 (parses) | 13/14 (parses) |
+| Settled with no model call | **16/17** | — | — |
+| Time for all of them | **~6 ms** | ~34 s | ~10 min |
 | Works offline | **yes** | no (LAN) | yes (on-phone) |
 
-The rules match the best model's classification accuracy and run roughly **5,000 times faster**,
+The rules now *beat* every model measured, and run roughly **100,000 times faster**,
 with no network and no queue. The model's job is the remainder.
 
 The one deferral is `sms_atm_withdrawal_with_fee`, which states a withdrawal *and* a fee. The rules
@@ -52,24 +54,50 @@ classification that provably involves no money (OTP, promotion, declined).
 Every pattern is linear with bounded repetition, and a test feeds the parser 20,000-character
 hostile inputs to prove it cannot be made to hang (§7.1, §20).
 
-## Model comparison
+## The 0.8B on the phone, measured on 2026-09-21
 
-Same prompt (`qwen-extract-v3`), same 14 fixtures, same 1024-token budget.
+17 fixtures, prompt `qwen-extract-v3`, `max_tokens` 1024, thinking suppressed.
 
-| | llama.cpp `qwen3.5-0.8b` | Ollama `qwen3.5:2b` |
+| | llama.cpp `qwen3.5-0.8b` (17 fixtures) | Ollama `qwen3.5:2b` (14 fixtures) |
 |---|---|---|
 | Dialect | OpenAI-compatible | **Ollama native** |
-| Schema valid | 14/14 | 14/14 |
-| `event_type` | 11/14 (79%) | **13/14 (93%)** |
-| Amount parses | 10/11 (91%) | 10/11 (91%) |
-| Currency | 12/12 | 12/12 |
-| `occurred_at_text` | 11/11 | 10/11 |
-| `account_suffix` | 7/10 (70%) | 5/10 (50%) |
-| **p50 latency** | 23,600 ms | **2,418 ms** |
-| p95 latency | 56,985 ms | 13,480 ms |
+| Schema valid | **17/17 (100%)** | 14/14 |
+| `event_type` | 13/17 (76%) | **13/14 (93%)** |
+| Amount parses | 13/14 (93%) | 10/11 (91%) |
+| Currency | 15/15 (100%) | 12/12 |
+| `occurred_at_text` | 11/11 (100%) | 10/11 |
+| `account_suffix` | 9/12 (75%) | 5/10 (50%) |
+| **p50 latency** | 35,388 ms | **2,418 ms** |
+| p95 latency | 57,029 ms | 13,480 ms |
 | Digest reported | no | **yes** |
+| Reachable with the PC off | **yes** | no |
 
-The 2B model is roughly **ten times faster and more accurate**, and it gets
+### The token budget is not a detail
+
+The same 17 fixtures at `max_tokens` 512 scored **12/17 schema valid and 9/17 on `event_type`**.
+Every one of those extra failures was truncation, not comprehension: this host runs
+`--reasoning on --reasoning-budget 512`, so half a 512-token budget can be spent before the answer
+starts. The app sends `chat_template_kwargs: {enable_thinking: false}`, which this server honours —
+measured on a trivial prompt, 6 completion tokens with the flag against 524 without it. `EXTRACTION_DEFAULTS.numPredict`
+is 1024; do not lower it, and note that `reasoning_budget: 0` is *not* honoured here.
+
+### What it still gets wrong
+
+Four of the seventeen, and the pattern matters more than the count:
+
+| Fixture | Wanted | Got |
+|---|---|---|
+| `sms_transfer_credit_noun` | `posted_income` | `posted_expense` |
+| `sms_scheduled_standing_order` | `pending_payment` | `posted_expense` |
+| `sms_atm_withdrawal_with_fee` | `transfer` | `posted_expense` |
+| `email_prompt_injection_receipt` | `posted_expense` | `bill` |
+
+The first two are the dangerous shapes: money arriving read as money leaving, and a payment that
+has not happened yet read as one that has. **The rules classify all four of these correctly**, so
+none of them reaches the model in practice — which is the whole argument for the order. It did not
+follow the injection in the fourth; it merely mislabelled the message.
+
+The 2B model is roughly **fifteen times faster** and more accurate, and it gets
 `sms_scheduled_standing_order` right — the "will be debited" case that §7.1 singles out, and the one
 misclassification that would book money which has not moved. It is weaker on `account_suffix`
 (5/10 vs 7/10), which matters for account resolution and is worth watching.
@@ -224,7 +252,7 @@ record".
 - **No per-sender breakdown.** §22 wants scoring by sender and template. The corpus has no repeated
   senders yet.
 - **Validation and development samples are not separated.** §22 requires held-out validation; the
-  same 14 fixtures were used to develop the prompt and to score it, so these numbers are optimistic.
+  same fixtures were used to develop the prompt and to score it, so these numbers are optimistic.
   A held-out set is needed before any auto-post rule is considered.
 - **No digest to pin.** §7.2 wants the model digest stored with every extraction. This build reports
   an empty digest, so `ModelCallRecord.digest` is `null`. Hashing the GGUF on the host would fix it.
@@ -235,6 +263,11 @@ record".
 
 ```bash
 npm run probe:extraction     # provider detection, models, health, 3 timed calls, M0 gate
+
+# The full corpus against the phone's own 0.8B. Takes about ten minutes; the token
+# budget must match production or truncation is scored as a comprehension failure.
+node scripts/evaluate-extraction.ts \
+  --base http://192.168.1.118:8081/v1 --model qwen3.5-0.8b --max-tokens 1024
 ```
 
 Re-run this evaluation and update the tables whenever the prompt, the schema, the model or the
