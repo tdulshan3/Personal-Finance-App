@@ -677,6 +677,64 @@ ALTER TABLE source_senders ADD COLUMN owner_blocked INTEGER NOT NULL DEFAULT 0 C
 ALTER TABLE source_senders ADD COLUMN default_account_id TEXT REFERENCES ledger_accounts(id);
 `;
 
+/* -------------------------------------------------------------------------------------------- */
+/* 008 — planning: category direction, budgets, recurring items, savings goals (buildspec M4/M5)  */
+/* -------------------------------------------------------------------------------------------- */
+
+const MIGRATION_008 = /* sql */ `
+-- A category is either somewhere money goes or somewhere it comes from. The forms offer income
+-- categories (Salary, Interest) for income and spending categories for everything else, so a
+-- salary can no longer be filed under Groceries by accident.
+ALTER TABLE categories ADD COLUMN kind TEXT NOT NULL DEFAULT 'expense' CHECK (kind IN ('expense','income'));
+UPDATE categories SET kind = 'income' WHERE id = 'income';
+
+-- A monthly spending limit per category and currency. Planning only: nothing here moves money,
+-- and the figure it is compared with is always summed from the ledger.
+CREATE TABLE category_budgets (
+  category_id  TEXT NOT NULL REFERENCES categories(id),
+  currency     TEXT NOT NULL CHECK (length(currency) = 3),
+  amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+  updated_at   INTEGER NOT NULL,
+  PRIMARY KEY (category_id, currency)
+) STRICT;
+
+-- Money the owner expects every month: rent, broadband, a subscription (out) or a salary (in).
+-- buildspec.md §11: recurrence is detected but only an owner-approved row exists here. A payment
+-- is recognised by its merchant or payer name; nothing is ever posted from this table.
+CREATE TABLE recurring_items (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  direction    TEXT NOT NULL CHECK (direction IN ('out','in')),
+  amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+  currency     TEXT NOT NULL CHECK (length(currency) = 3),
+  due_day      INTEGER NOT NULL CHECK (due_day BETWEEN 1 AND 31),
+  account_id   TEXT REFERENCES ledger_accounts(id),
+  category_id  TEXT REFERENCES categories(id),
+  match_text   TEXT,
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL,
+  archived_at  INTEGER
+) STRICT;
+
+CREATE INDEX idx_recurring_active ON recurring_items (archived_at, due_day);
+
+-- buildspec.md §12: "Goals and virtual reservations". A goal is a target and, optionally, a date.
+-- Progress is the balance of the account it is linked to, or a figure the owner keeps by hand —
+-- a reservation that moves no money.
+CREATE TABLE savings_goals (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  target_minor INTEGER NOT NULL CHECK (target_minor > 0),
+  currency     TEXT NOT NULL CHECK (length(currency) = 3),
+  target_date  TEXT,
+  account_id   TEXT REFERENCES ledger_accounts(id),
+  saved_minor  INTEGER NOT NULL DEFAULT 0 CHECK (saved_minor >= 0),
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL,
+  archived_at  INTEGER
+) STRICT;
+`;
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   Object.freeze({ version: 1, name: "ledger-foundation", sql: MIGRATION_001 }),
   Object.freeze({ version: 2, name: "inference-endpoints", sql: MIGRATION_002 }),
@@ -685,6 +743,7 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
   Object.freeze({ version: 5, name: "assistant-proposals", sql: MIGRATION_005 }),
   Object.freeze({ version: 6, name: "card-payment-terms", sql: MIGRATION_006 }),
   Object.freeze({ version: 7, name: "sender-auto-keep-and-account", sql: MIGRATION_007 }),
+  Object.freeze({ version: 8, name: "planning", sql: MIGRATION_008 }),
 ]);
 
 function checksumOf(migration: Migration): string {

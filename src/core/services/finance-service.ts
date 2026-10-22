@@ -68,9 +68,13 @@ export const DEFAULT_CATEGORIES: readonly {
   { id: "uncategorized", name: "Uncategorized", icon: "help-circle", kind: "expense" },
 ]);
 
+export type CategoryKind = "expense" | "income";
+
 export type Category = {
   readonly id: string;
   readonly name: string;
+  /** Where money goes (`expense`) or where it comes from (`income`). Fixed once the category exists. */
+  readonly kind: CategoryKind;
   readonly parentId?: string | undefined;
   readonly iconKey?: string | undefined;
   readonly isSystem: boolean;
@@ -177,13 +181,13 @@ export function createFinanceService(options: FinanceServiceOptions) {
   function seedDefaultCategories(): void {
     const now = clock.now();
     const insert = db.prepare(
-      `INSERT INTO categories (id, name, icon_key, sort_order, is_system, created_at, updated_at)
-       VALUES (?,?,?,?,1,?,?)
+      `INSERT INTO categories (id, name, kind, icon_key, sort_order, is_system, created_at, updated_at)
+       VALUES (?,?,?,?,?,1,?,?)
        ON CONFLICT(id) DO NOTHING`,
     );
     db.transaction(() => {
       DEFAULT_CATEGORIES.forEach((category, index) => {
-        insert.run(category.id, category.name, category.icon, index, now, now);
+        insert.run(category.id, category.name, category.kind, category.icon, index, now, now);
       });
     });
   }
@@ -198,6 +202,7 @@ export function createFinanceService(options: FinanceServiceOptions) {
     ).map((row) => ({
       id: asText(row.id, "id"),
       name: asText(row.name, "name"),
+      kind: asText(row.kind, "kind") === "income" ? "income" : "expense",
       parentId: asOptionalText(row.parent_id, "parent_id"),
       iconKey: asOptionalText(row.icon_key, "icon_key"),
       isSystem: asNumber(row.is_system, "is_system") === 1,
