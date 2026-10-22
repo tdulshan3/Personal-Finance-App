@@ -1,87 +1,72 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import type { Money } from "../core/domain/money.ts";
-import { formatMoney, requireCurrency } from "../core/domain/money.ts";
+import { money, requireCurrency } from "../core/domain/money.ts";
+import { daysBetween, localDateOf } from "../core/domain/time.ts";
+import { createBalanceCheckService } from "../core/services/balance-check.ts";
+import { createBudgetService } from "../core/services/budget-service.ts";
 import { createCardDueService } from "../core/services/card-dues.ts";
 import { createDashboardService, resolvePeriod } from "../core/services/dashboard-service.ts";
-import { localDateOf } from "../core/domain/time.ts";
+import { createForecastService } from "../core/services/forecast-service.ts";
+import { createRecurringService } from "../core/services/recurring-service.ts";
 import { backgroundStatus, currentProcessor } from "../server/background.ts";
 import { currentVault, requireDb, requireService, unlockedSince } from "../server/runtime.ts";
 import { accessState } from "../server/session.ts";
-import { Donut, FlowBars, TrendLine, chartColor } from "../ui/charts.tsx";
-import { QuickLinks } from "../ui/navigation.tsx";
-import { labelForAccountType, labelForKind } from "../ui/labels.ts";
-import { Amount, Badge, Card, Columns, EmptyState, List, ListRow, PageHeader, Shell, Stack, Stat } from "../ui/primitives.tsx";
-import styles from "./dashboard.module.css";
-import { LockButton } from "./lock-button.tsx";
+import { delta as deltaText, money as moneyText, relativeDays, shortDate } from "../ui/format.ts";
+import { iconForCategory, labelForKind } from "../ui/labels.ts";
+import type { Attention, HomeData } from "./home-view.tsx";
+import { HomeView } from "./home-view.tsx";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Home: the dashboard.
  *
- * buildspec.md §13 requires: "Liquid balance, amount owed, current-period spending, upcoming bills,
- * suggested savings, source health, unresolved review count, recent transactions." Bills and
- * savings belong to later milestones, so they appear as an honest "still to come" note rather than
- * as zeroes that look like real answers.
+ * buildspec.md §13 requires "liquid balance, amount owed, current-period spending, upcoming bills,
+ * suggested savings, source health, unresolved review count, recent transactions". Every figure is
+ * summed from journal entries by `dashboard-service`, so a transfer or a card payment is never
+ * spending and a refund never income. The period lives in the URL (`?period=`), so it survives a
+ * reload and a live refresh redraws everything with fresh data.
  *
- * Every figure and every chart is computed by `dashboard-service` from journal entries, so a
- * transfer or a card payment is never counted as spending and a refund never as income. The period
- * lives in the URL (`?period=`), which keeps this a server component: a live refresh redraws the
- * charts with no client code, and the chosen period survives a reload.
+ * "Needs attention" is the ledger read back to the owner: messages waiting, budgets passed,
+ * bills due or late, a projection that dips under the buffer, a balance the bank disagrees with.
  */
-export default async function HomePage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+export default async function HomePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const access = await accessState();
   if (access.kind === "needs-setup") redirect("/setup");
   if (access.kind !== "ready") redirect("/unlock");
 
+  const db = requireDb();
   const service = requireService();
   const today = localDateOf(Date.now(), service.zone);
-
   const params = await searchParams;
   const period = resolvePeriod(typeof params.period === "string" ? params.period : undefined, today);
-  const dash = createDashboardService({ db: requireDb() });
+  const dash = createDashboardService({ db });
   const currency = requireCurrency(currentVault()?.currency ?? "LKR");
-  const otherCurrencies = dash.activeCurrencies().filter((code) => code !== currency.code);
+  const lkr = (minor: bigint) => money(currency, minor);
 
   const now = dash.totals(currency, period.from, period.to);
   const before = dash.totals(currency, period.previous.from, period.previous.to);
+  const categories = service.listCategories(true);
+  const categoryOf = new Map(categories.map((c) => [c.id, c]));
   const spendingByCategory = dash.byCategory(currency, period.from, period.to, "expense");
-  const incomeBySource = dash.byCategory(currency, period.from, period.to, "income");
-  const flow = dash.monthlyFlow(currency, today, 6);
-  const merchants = dash.topMerchants(currency, period.from, period.to, 5);
+  const top = spendingByCategory.slice(0, 6);
+  const restMinor = spendingByCategory.slice(6).reduce((sum, row) => sum + row.amount.minor, 0n);
+  const share = (minor: bigint) => (now.spending.minor > 0n ? Number(minor) / Number(now.spending.minor) : 0);
+
   const cumulative = (days: { amount: Money }[]) => {
-    let running = 0;
-    return days.map((day) => (running += Number(day.amount.minor)));
+    let running = 0n;
+    return days.map((day) => (running += day.amount.minor));
   };
   const trendNow = cumulative(dash.dailySpending(currency, period.from, period.to));
   const trendBefore = cumulative(dash.dailySpending(currency, period.previous.from, period.previous.to));
-
-  // Six named slices at most; the tail is grouped so the ring stays readable.
-  const topCategories = spendingByCategory.slice(0, 6);
-  const restMinor = spendingByCategory.slice(6).reduce((sum, row) => sum + row.amount.minor, 0n);
-  const savingsRate = now.income.minor > 0n ? Math.round((Number(now.net.minor) / Number(now.income.minor)) * 100) : null;
-  const hasFlow = flow.some((m) => m.income.minor !== 0n || m.spending.minor !== 0n);
   const dayCount = Math.max(trendNow.length, 1);
-
-  const recent = service.searchTransactions({ limit: 6 });
-  const categories = new Map(service.listCategories(true).map((c) => [c.id, c.name]));
-  const nameOf = (id: string) => categories.get(id) ?? id;
-  const unlockedAt = unlockedSince();
-  const accounts = service.accountBalances().filter((row) => row.account.isUserVisible);
-  const inbox = currentProcessor()?.counts() ?? { staged: 0, waitingForModel: 0, openReviews: 0 };
-  const capture = backgroundStatus();
 
   /*
    * Total balance, per currency: every account the owner holds, less what is on their cards. The
-   * unused part of a credit limit is shown beside it but never added in — it is the bank's money,
-   * and counting it would make the total rise every time a limit is raised (buildspec.md §10).
+   * unused part of a credit limit is shown beside it but never added in (buildspec.md §10).
    */
+  const accounts = service.accountBalances().filter((row) => row.account.isUserVisible);
   const byCurrency = new Map<string, { assets: bigint; owed: bigint; available: bigint; hasCards: boolean; hasLimit: boolean }>();
   for (const { account, balance, available } of accounts) {
     const slot = byCurrency.get(account.currency.code) ?? { assets: 0n, owed: 0n, available: 0n, hasCards: false, hasLimit: false };
@@ -99,391 +84,110 @@ export default async function HomePage({
     const unit = requireCurrency(code);
     return {
       code,
-      total: { currency: unit, minor: slot.assets - slot.owed },
-      assets: { currency: unit, minor: slot.assets },
-      owed: { currency: unit, minor: slot.owed },
-      available: slot.hasLimit ? { currency: unit, minor: slot.available } : null,
+      total: money(unit, slot.assets - slot.owed),
+      assets: money(unit, slot.assets),
+      owed: money(unit, slot.owed),
+      available: slot.hasLimit ? money(unit, slot.available) : null,
       hasCards: slot.hasCards,
     };
   });
-  const cardDues = createCardDueService({ db: requireDb(), service }).list(today).filter((due) => due.owed.minor > 0n);
 
-  return (
-    <Shell>
-      <PageHeader
-        title={greeting()}
-        subtitle={
-          unlockedAt
-            ? `Unlocked at ${new Date(unlockedAt).toLocaleTimeString("en-GB", {
-                hour: "2-digit",
-                minute: "2-digit",
-                timeZone: service.zone,
-              })}`
-            : undefined
-        }
-        // The desktop sidebar carries Lock; repeating it here would put two on one screen.
-        action={
-          <span className="phone-only">
-            <LockButton />
-          </span>
-        }
-      />
+  const inbox = currentProcessor()?.counts() ?? { staged: 0, waitingForModel: 0, openReviews: 0 };
+  const capture = backgroundStatus();
+  const recurring = createRecurringService({ db, service }).list(today);
+  const dues = createCardDueService({ db, service }).list(today).filter((due) => due.owed.minor > 0n && due.account.type !== "loan");
+  const budgets = createBudgetService({ db, service }).list(currency, today);
+  const forecast = createForecastService({ db, service }).project(currency, today);
+  const checks = createBalanceCheckService({ db, service }).accounts();
 
-      <Card tone="glass">
-        {worth.length === 0 ? (
-          <Stat label="Total balance" value={<span style={{ color: "var(--text-secondary)" }}>No accounts yet</span>} />
-        ) : (
-          <div style={{ display: "grid", gap: "var(--space-5)" }}>
-            {/* buildspec.md §9.1: currencies are reported separately, never summed. */}
-            {worth.map((row) => (
-              <div key={row.code} style={{ display: "grid", gap: "var(--space-4)" }}>
-                <Stat
-                  label="Total balance"
-                  value={<Amount value={row.total} emphasis="large" srLabel="total balance across all accounts" />}
-                  hint={row.owed.minor > 0n ? "Everything in your accounts, less what is on your cards." : "Everything in your accounts."}
-                />
-                <div className={styles.split}>
-                  <div>
-                    <span className={styles.kpiLabel}>In accounts</span>
-                    <Amount value={row.assets} srLabel="in accounts" />
-                  </div>
-                  {row.hasCards ? (
-                    <div>
-                      <span className={styles.kpiLabel}>On credit cards</span>
-                      <Amount value={row.owed} srLabel="current balance on credit cards" />
-                    </div>
-                  ) : null}
-                  {row.available ? (
-                    <div>
-                      <span className={styles.kpiLabel}>Credit available</span>
-                      <Amount value={row.available} emphasis="muted" srLabel="credit still available" />
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
+  // Bills and payments in the next fortnight, card payments and saved bills together, soonest first.
+  const upcoming = [
+    ...dues
+      .filter((due) => due.dueOn !== null && due.daysLeft !== null && due.daysLeft <= 14)
+      .map((due) => ({ key: due.account.id, name: `${due.account.name} payment`, date: due.dueOn!, amount: due.owed, days: due.daysLeft!, direction: "out" as const })),
+    ...recurring
+      .filter((row) => row.state !== "paid" && row.daysUntil <= 14)
+      .map((row) => ({ key: row.id, name: row.name, date: row.nextDue, amount: row.amount, days: row.daysUntil, direction: row.direction })),
+  ].sort((a, b) => a.date.localeCompare(b.date));
 
-      <nav aria-label="Period" className={styles.segments}>
-        {([["month", "This month"], ["last", "Last month"], ["3m", "3 months"], ["year", "This year"]] as const).map(([key, label]) => (
-          <Link key={key} href={key === "month" ? "/" : `/?period=${key}`} scroll={false} className={styles.segment} aria-current={period.key === key ? "true" : undefined}>
-            {label}
-          </Link>
-        ))}
-      </nav>
+  const attention: Attention[] = [];
+  if (inbox.openReviews > 0) {
+    attention.push({ key: "review", icon: "tray", tone: "neutral", title: `${inbox.openReviews} message${inbox.openReviews === 1 ? "" : "s"} to review`, detail: "Read from your bank messages. Nothing is recorded until you accept it.", href: "/review" });
+  }
+  for (const row of budgets.filter((b) => b.status === "over")) {
+    attention.push({ key: `over-${row.categoryId}`, icon: "exclamationmark-triangle", tone: "bad", title: `${row.categoryName} is over budget`, detail: `${moneyText(row.spent)} spent of ${moneyText(row.limit)} this month.`, href: "/plan" });
+  }
+  for (const row of budgets.filter((b) => b.status === "near")) {
+    attention.push({ key: `near-${row.categoryId}`, icon: "chart-bar", tone: "warning", title: `${row.categoryName} is close to its budget`, detail: `${Math.round(row.ratio * 100)}% used; at this pace the month ends near ${moneyText(row.projected)}.`, href: "/plan" });
+  }
+  for (const row of recurring.filter((r) => r.state === "overdue")) {
+    attention.push({ key: `late-${row.id}`, icon: "clock", tone: "warning", title: `${row.name} was ${row.direction === "in" ? "expected" : "due"} ${relativeDays(row.daysUntil)}`, detail: `${moneyText(row.amount)} on ${shortDate(row.dueThisMonth, today)}. Nothing matching it is recorded this month.`, href: "/bills" });
+  }
+  for (const due of dues.filter((d) => d.daysLeft !== null && d.daysLeft <= 7)) {
+    attention.push({ key: `card-${due.account.id}`, icon: "creditcard", tone: "warning", title: `${due.account.name} payment due ${relativeDays(due.daysLeft!)}`, detail: `${moneyText(due.owed)} on the card today.`, href: "/bills" });
+  }
+  if (forecast.belowBufferOn) {
+    attention.push({ key: "buffer", icon: "exclamationmark-triangle", tone: "bad", title: `Cash could fall below your buffer ${forecast.belowBufferOn === today ? "today" : `on ${shortDate(forecast.belowBufferOn, today)}`}`, detail: `In the cautious projection. Your buffer is ${moneyText(forecast.buffer)}.`, href: "/plan" });
+  }
+  for (const check of checks.filter((c) => c.difference.minor !== 0n && c.compares === "balance")) {
+    attention.push({ key: `check-${check.account.id}`, icon: "questionmark-circle", tone: "warning", title: `${check.account.name} differs from your bank`, detail: `${deltaText(check.difference)} against the balance the bank last reported.`, href: "/accounts" });
+  }
+  const uncategorized = spendingByCategory.find((row) => row.categoryId === "uncategorized");
+  if (uncategorized && uncategorized.amount.minor > 0n) {
+    attention.push({ key: "uncategorized", icon: "tag", tone: "neutral", title: `${moneyText(uncategorized.amount)} is uncategorised`, detail: `${period.label}. Filing it makes budgets and the plan more accurate.`, href: `/transactions?category=uncategorized&from=${period.from}&to=${period.to}` });
+  }
+  if (before.spending.minor > 0n && now.spending.minor > (before.spending.minor * 115n) / 100n) {
+    const percent = Math.round((Number(now.spending.minor - before.spending.minor) / Number(before.spending.minor)) * 100);
+    attention.push({ key: "pace", icon: "arrow-up", tone: "neutral", title: `Spending is ${percent}% higher than ${period.previous.label}`, detail: `${moneyText(now.spending)} against ${moneyText(before.spending)}.`, href: `/transactions?from=${period.from}&to=${period.to}` });
+  }
 
-      <section className={styles.kpis} aria-label={`Summary, ${period.label.toLowerCase()}`}>
-        <Kpi label="Income" color="var(--chart-income)" value={now.income} delta={describeChange(now.income.minor, before.income.minor, "up-is-good", period.previous.label)} />
-        <Kpi label="Spending" color="var(--chart-spending)" value={now.spending} delta={describeChange(now.spending.minor, before.spending.minor, "down-is-good", period.previous.label)} />
-        <Kpi
-          label={now.net.minor < 0n ? "Overspent" : "Left over"}
-          value={now.net}
-          delta={{ text: now.net.minor < 0n ? "Spending is ahead of income" : "Income minus spending", tone: now.net.minor < 0n ? "bad" : "neutral" }}
-        />
-        <div className={styles.kpi}>
-          <span className={styles.kpiLabel}>Savings rate</span>
-          <span className={styles.kpiValue}>{savingsRate === null ? "—" : `${savingsRate}%`}</span>
-          <span className={styles.kpiDelta}>{savingsRate === null ? "Needs recorded income" : "Of income not spent"}</span>
-        </div>
-      </section>
+  const recent = service.searchTransactions({ limit: 8 }).map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    title: item.merchantName ?? labelForKind(item.kind),
+    category: item.categoryId ? (categoryOf.get(item.categoryId)?.name ?? item.categoryId) : item.merchantName ? labelForKind(item.kind) : null,
+    icon: item.categoryId ? iconForCategory(categoryOf.get(item.categoryId)?.iconKey, categoryOf.get(item.categoryId)?.kind) : null,
+    date: item.occurredLocalDate,
+    amount: item.amount,
+  }));
 
-      {otherCurrencies.length > 0 ? (
-        <p className={styles.insight} style={{ margin: 0 }}>
-          Charts show {currency.code}. You also have activity in {otherCurrencies.join(", ")}, which is never added to it.
-        </p>
-      ) : null}
+  const flow = dash.monthlyFlow(currency, today, 6);
+  const unlockedAt = unlockedSince();
 
-      {/*
-        Desktop: the ledger on the left, what needs attention on the right. On a phone the two
-        stacks dissolve into one list, and `order` keeps the sequence it always had: balance, then
-        anything to review, then shortcuts, then the detail.
-      */}
-      <Columns layout="main-aside">
-        <Stack>
-          <QuickLinks order={-1} />
-
-          <Card order={1} title="Cash flow" action={<span className={styles.kpiDelta}>Last 6 months</span>}>
-            {hasFlow ? (
-              <>
-                <FlowBars
-                  summary={`Income and spending for the last six months. ${period.label}: income ${formatMoney(now.income)}, spending ${formatMoney(now.spending)}.`}
-                  months={flow.map((m) => ({
-                    label: new Date(`${m.month}-01T00:00:00Z`).toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" }),
-                    income: Number(m.income.minor),
-                    spending: Number(m.spending.minor),
-                    incomeText: formatMoney(m.income),
-                    spendingText: formatMoney(m.spending),
-                  }))}
-                />
-                <div className={styles.chartKey}>
-                  <span><i className={styles.dot} style={{ background: "var(--chart-income)" }} />Income</span>
-                  <span><i className={styles.dot} style={{ background: "var(--chart-spending)" }} />Spending</span>
-                </div>
-              </>
-            ) : (
-              <p className={styles.insight} style={{ marginTop: 0 }}>
-                Nothing recorded yet. Income and spending will be charted here month by month.
-              </p>
-            )}
-          </Card>
-
-          <Card
-            order={2}
-            title="Where it went"
-            action={<span className={styles.kpiDelta}>{period.from} to {period.to}</span>}
-          >
-            {spendingByCategory.length === 0 ? (
-              <p className={styles.insight} style={{ marginTop: 0 }}>No spending recorded {period.label.toLowerCase()}.</p>
-            ) : (
-              <div className={styles.breakdown}>
-                <Donut
-                  summary={`Spending by category, ${period.label.toLowerCase()}. Largest: ${nameOf(topCategories[0]!.categoryId)} at ${formatMoney(topCategories[0]!.amount)}.`}
-                  slices={[
-                    ...topCategories.map((row, index) => ({ label: nameOf(row.categoryId), value: Number(row.amount.minor), color: chartColor(index), text: formatMoney(row.amount) })),
-                    ...(restMinor > 0n ? [{ label: "Everything else", value: Number(restMinor), color: "var(--chart-8)", text: formatMoney({ currency, minor: restMinor }) }] : []),
-                  ]}
-                >
-                  <span className={styles.centreLabel}>Spent</span>
-                  <span className={styles.centreValue}>{formatMoney(now.spending, { withCode: false })}</span>
-                </Donut>
-                <ul className={styles.legend}>
-                  {[...topCategories, ...(restMinor > 0n ? [{ categoryId: "__rest", amount: { currency, minor: restMinor } }] : [])].map((row, index) => {
-                    const share = now.spending.minor > 0n ? Math.round((Number(row.amount.minor) / Number(now.spending.minor)) * 100) : 0;
-                    const color = row.categoryId === "__rest" ? "var(--chart-8)" : chartColor(index);
-                    const label = row.categoryId === "__rest" ? "Everything else" : nameOf(row.categoryId);
-                    return (
-                      <li key={row.categoryId} className={styles.legendRow}>
-                        <i className={styles.dot} style={{ background: color }} />
-                        {row.categoryId === "__rest" ? (
-                          <span className={styles.legendName}>{label}</span>
-                        ) : (
-                          <Link className={styles.legendName} href={`/transactions?category=${encodeURIComponent(row.categoryId)}&from=${period.from}&to=${period.to}`}>
-                            {label}
-                          </Link>
-                        )}
-                        <span className={styles.legendAmount}>
-                          {formatMoney(row.amount, { withCode: false })}
-                          <span className={styles.legendShare}>{share}%</span>
-                        </span>
-                        <span className={styles.track}><span className={styles.fill} style={{ width: `${Math.max(share, 1)}%`, background: color }} /></span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            )}
-          </Card>
-
-          <Card order={3} title="Spending pace" action={<span className={styles.kpiDelta}>Running total</span>}>
-            <TrendLine
-              current={trendNow}
-              previous={trendBefore}
-              summary={`Running total of spending ${period.label.toLowerCase()}: ${formatMoney(now.spending)}, against ${formatMoney(before.spending)} for ${period.previous.label}.`}
-            />
-            <div className={styles.chartKey}>
-              <span><i className={styles.dot} style={{ background: "var(--chart-spending)" }} />{period.label}</span>
-              <span><i className={styles.dash} />{period.previous.label}</span>
-            </div>
-            <p className={styles.insight}>
-              About <strong>{formatMoney({ currency, minor: now.spending.minor / BigInt(dayCount) })}</strong> a day on average over {dayCount} day{dayCount === 1 ? "" : "s"}.
-            </p>
-          </Card>
-
-          <Card
-            order={6}
-            title="Recent activity"
-            action={<Link href="/transactions">See all</Link>}
-          >
-            {recent.length === 0 ? (
-              <EmptyState
-                title="Nothing recorded yet"
-                body="Add your accounts and a first transaction, or connect message capture later."
-                action={<Link href="/transactions/new">Add a transaction</Link>}
-              />
-            ) : (
-              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "var(--space-4)" }}>
-                {recent.map((item) => (
-                  <li
-                    key={item.id}
-                    style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-4)" }}
-                  >
-                    <div style={{ display: "grid", gap: "2px", minWidth: 0 }}>
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {item.merchantName ?? labelForKind(item.kind)}
-                      </span>
-                      <span style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {/* Only a label that adds something: "Opening balance · Opening balance" does not. */}
-                        {[categories.get(item.categoryId ?? "") ?? (item.merchantName ? labelForKind(item.kind) : null), item.occurredLocalDate]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </span>
-                    </div>
-                    <Amount value={item.amount} srLabel={labelForKind(item.kind)} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-        </Stack>
-
-        <Stack>
-          {inbox.openReviews > 0 ? (
-            <Card tone="glass" order={-2}>
-              <Link
-                href="/review"
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "var(--space-4)", textDecoration: "none", color: "inherit", minHeight: "var(--touch-target)" }}
-              >
-                <span style={{ display: "grid", gap: "2px" }}>
-                  <strong>
-                    {inbox.openReviews} message{inbox.openReviews === 1 ? "" : "s"} to review
-                  </strong>
-                  <span style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
-                    Read from your bank messages. Nothing is recorded until you accept it.
-                  </span>
-                </span>
-                <Badge tone="primary">Review</Badge>
-              </Link>
-            </Card>
-          ) : null}
-
-          {cardDues.length > 0 ? (
-            <Card order={0} title="Upcoming" action={<Link href="/bills">Bills</Link>}>
-              <List>
-                {cardDues.map((due) => (
-                  <ListRow
-                    key={due.account.id}
-                    href="/bills"
-                    subtitle={due.dueOn ? `Card payment · due ${due.dueOn}${due.daysLeft !== null ? ` · ${due.daysLeft} days` : ""}` : "Card payment · next month · set the due day"}
-                    trailing={<Amount value={due.owed} srLabel="owed" />}
-                  >
-                    {due.account.name}
-                  </ListRow>
-                ))}
-              </List>
-            </Card>
-          ) : null}
-
-          <Card order={4} title="Top merchants" action={<span className={styles.kpiDelta}>{period.label}</span>}>
-            {merchants.length === 0 ? (
-              <p className={styles.insight} style={{ marginTop: 0 }}>No named merchants {period.label.toLowerCase()}.</p>
-            ) : (
-              <List>
-                {merchants.map((row) => (
-                  <ListRow
-                    key={row.merchant}
-                    href={`/transactions?q=${encodeURIComponent(row.merchant)}&from=${period.from}&to=${period.to}`}
-                    subtitle={`${row.times} transaction${row.times === 1 ? "" : "s"}`}
-                    trailing={<Amount value={row.amount} srLabel="spent at" />}
-                  >
-                    {row.merchant}
-                  </ListRow>
-                ))}
-              </List>
-            )}
-          </Card>
-
-          <Card order={5} title="Income sources" action={<span className={styles.kpiDelta}>{period.label}</span>}>
-            {incomeBySource.length === 0 ? (
-              <p className={styles.insight} style={{ marginTop: 0 }}>No income recorded {period.label.toLowerCase()}.</p>
-            ) : (
-              <ul className={styles.legend}>
-                {incomeBySource.slice(0, 5).map((row) => {
-                  const share = now.income.minor > 0n ? Math.round((Number(row.amount.minor) / Number(now.income.minor)) * 100) : 0;
-                  return (
-                    <li key={row.categoryId} className={styles.legendRow}>
-                      <i className={styles.dot} style={{ background: "var(--chart-income)" }} />
-                      <span className={styles.legendName}>{nameOf(row.categoryId)}</span>
-                      <span className={styles.legendAmount}>
-                        {formatMoney(row.amount, { withCode: false })}
-                        <span className={styles.legendShare}>{share}%</span>
-                      </span>
-                      <span className={styles.track}><span className={styles.fill} style={{ width: `${Math.max(share, 1)}%`, background: "var(--chart-income)" }} /></span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Card>
-
-          <Card order={7} title="Accounts" action={<Link href="/accounts">Manage</Link>}>
-            {accounts.length === 0 ? (
-              <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-sm)" }}>
-                No accounts yet. <Link href="/accounts">Add your first one</Link>.
-              </p>
-            ) : (
-              <List>
-                {accounts.map(({ account, balance, available }) => (
-                  <ListRow
-                    key={account.id}
-                    subtitle={
-                      available
-                        ? `${labelForAccountType(account.type)} · ${formatMoney(available)} available`
-                        : labelForAccountType(account.type)
-                    }
-                    // A card's figure is what is currently on it, never added to spendable money (§10).
-                    trailing={<Amount value={balance} srLabel={account.kind === "liability" ? "current balance on" : "balance of"} />}
-                  >
-                    {account.name}
-                  </ListRow>
-                ))}
-              </List>
-            )}
-          </Card>
-
-          <Card order={8} title="Message capture">
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
-              {capture.active ? <Badge tone="success">Checking every minute</Badge> : <Badge tone="warning">Paused</Badge>}
-              {inbox.staged > 0 ? <Badge>{inbox.staged} not read yet</Badge> : null}
-              {inbox.waitingForModel > 0 ? <Badge tone="warning">{inbox.waitingForModel} waiting for the model</Badge> : null}
-              {inbox.openReviews === 0 && inbox.staged === 0 ? <Badge>All caught up</Badge> : null}
-            </div>
-            <p style={{ marginTop: "var(--space-3)", fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
-              Still to come: bills and reminders, forecasts and savings, Gmail. Nothing above depends on them.
-            </p>
-          </Card>
-        </Stack>
-      </Columns>
-    </Shell>
-  );
-}
-
-type Delta = { text: string; tone: "good" | "bad" | "neutral" };
-
-/** "12% less than the same days last month" — a direction in words, never colour alone (§13). */
-function describeChange(current: bigint, previous: bigint, sense: "up-is-good" | "down-is-good", against: string): Delta {
-  if (previous === 0n) return { text: current === 0n ? "Nothing recorded yet" : `Nothing in ${against} to compare`, tone: "neutral" };
-  const percent = Math.round((Number(current - previous) / Number(previous)) * 100);
-  if (percent === 0) return { text: `Level with ${against}`, tone: "neutral" };
-  const up = percent > 0;
-  return {
-    text: `${Math.abs(percent)}% ${up ? "more" : "less"} than ${against}`,
-    tone: up === (sense === "up-is-good") ? "good" : "bad",
+  const data: HomeData = {
+    today,
+    unlockedAt: unlockedAt ? new Date(unlockedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: service.zone }) : null,
+    period: { key: period.key, label: period.label, from: period.from, to: period.to, previousLabel: period.previous.label },
+    currency: currency.code,
+    digits: currency.minorUnitDigits,
+    otherCurrencies: dash.activeCurrencies().filter((code) => code !== currency.code),
+    worth,
+    totals: now,
+    previous: before,
+    savingsRate: now.income.minor > 0n ? Math.round((Number(now.net.minor) / Number(now.income.minor)) * 100) : null,
+    flow: flow.map((m) => ({ month: m.month, income: m.income, spending: m.spending })),
+    categories: [
+      ...top.map((row) => ({ id: row.categoryId, name: categoryOf.get(row.categoryId)?.name ?? row.categoryId, amount: row.amount, share: share(row.amount.minor) })),
+      ...(restMinor > 0n ? [{ id: "", name: "Everything else", amount: lkr(restMinor), share: share(restMinor) }] : []),
+    ],
+    merchants: dash.topMerchants(currency, period.from, period.to, 5),
+    trend: { current: trendNow, previous: trendBefore },
+    dailyAverage: lkr(now.spending.minor / BigInt(dayCount)),
+    dayCount,
+    recent,
+    accounts: accounts.map(({ account, balance, available }) => ({ id: account.id, name: account.name, type: account.type, kind: account.kind, balance, available: available ?? null })),
+    inbox,
+    captureActive: capture.active,
+    attention,
+    upcoming: upcoming.slice(0, 6).map((u) => ({ ...u, when: relativeDays(u.days) })),
+    plan: {
+      canSetAside: forecast.canSetAside,
+      monthEnd: forecast.monthEnd.base,
+      lowest: forecast.lowest.base,
+      confidence: forecast.confidence,
+      daysToMonthEnd: daysBetween(today, forecast.monthEnd.date),
+    },
   };
-}
 
-function Kpi({ label, value, delta, color }: { label: string; value: Money; delta: Delta; color?: string }) {
-  return (
-    <div className={styles.kpi}>
-      <span className={styles.kpiLabel}>
-        {color ? <i className={styles.dot} style={{ background: color }} /> : null}
-        {label}
-      </span>
-      <span className={styles.kpiValue}>
-        <span className={styles.kpiCode}>{value.currency.code}</span>
-        {formatMoney(value.minor < 0n ? { currency: value.currency, minor: -value.minor } : value, { withCode: false })}
-      </span>
-      <span className={delta.tone === "neutral" ? styles.kpiDelta : `${styles.kpiDelta} ${delta.tone === "good" ? styles.good : styles.bad}`}>{delta.text}</span>
-    </div>
-  );
+  return <HomeView data={data} />;
 }
-
-function greeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 12) return "Good morning";
-  if (hour < 18) return "Good afternoon";
-  return "Good evening";
-}
-

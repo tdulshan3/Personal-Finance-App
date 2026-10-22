@@ -1,29 +1,14 @@
-import type { ReactNode } from "react";
-
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { FinanceErrorCode, isFinanceError } from "../../../core/domain/errors.ts";
-import { formatMoney } from "../../../core/domain/money.ts";
 import { localDateOf, localDateOfFinancialTime } from "../../../core/domain/time.ts";
 import type { FinanceService } from "../../../core/services/finance-service.ts";
 import { requireService } from "../../../server/runtime.ts";
 import { accessState } from "../../../server/session.ts";
-import { cx } from "../../../ui/cx.ts";
+import { plainAmount } from "../../../ui/format.ts";
 import { labelForKind, labelForPrecision } from "../../../ui/labels.ts";
-import {
-  Amount,
-  Badge,
-  Card,
-  Columns,
-  InfoNote,
-  PageHeader,
-  Shell,
-  Stack,
-} from "../../../ui/primitives.tsx";
-import { DeleteTransactionButton, RestoreTransactionButton } from "../row-actions.tsx";
-import styles from "./detail.module.css";
-import { EditTransactionForm } from "./edit-transaction-form.tsx";
+import type { DetailData } from "./detail-view.tsx";
+import { DetailView } from "./detail-view.tsx";
 
 export const dynamic = "force-dynamic";
 
@@ -35,17 +20,9 @@ type Detail = ReturnType<FinanceService["getTransactionDetail"]>;
  *
  * buildspec.md §13 lists "create, edit, split, link transfer/refund, soft delete, restore" for
  * Transactions. §9.3 makes an edit a reversal plus a replacement, so the record keeps its id and
- * its history; the "Edited" badge is that history made visible.
- *
- * On a desktop the record and its form are the main column. Which accounts it touched, how often
- * it has changed, and the delete/restore control sit beside them — see `detail.module.css` for how
- * the two placements swap.
+ * its history; "Edited N times" is that history made visible.
  */
-export default async function TransactionDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function TransactionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const access = await accessState();
   if (access.kind === "needs-setup") redirect("/setup");
   if (access.kind !== "ready") redirect("/unlock");
@@ -63,27 +40,17 @@ export default async function TransactionDetailPage({
 
   const { transaction, currentRevision: revision } = detail;
   const kind = transaction.kind;
-  const title = revision.merchantName ?? labelForKind(kind);
   const localDate = localDateOfFinancialTime(revision.occurredAt);
-  const precisionNote = labelForPrecision(revision.occurredAt.precision);
   const isDeleted = transaction.status === "deleted";
-  const changes = detail.revisionCount - 1;
-
+  const isHistoryOnly = transaction.accountingScope === "history_only";
   const categories = service.listCategories(true);
-  const categoryName = (categoryId: string) =>
-    categories.find((c) => c.id === categoryId)?.name ?? categoryId;
+  const categoryName = (categoryId: string) => categories.find((c) => c.id === categoryId)?.name ?? categoryId;
 
   /*
    * A split record has no single category on its revision; the category lines live on the journal.
    * History-only and trashed records carry no journal, so this falls back to the revision.
    */
-  const journalCategoryIds = [
-    ...new Set(
-      (detail.journal?.entries ?? [])
-        .map((entry) => entry.categoryId)
-        .filter((value): value is string => value !== undefined),
-    ),
-  ];
+  const journalCategoryIds = [...new Set((detail.journal?.entries ?? []).map((entry) => entry.categoryId).filter((value): value is string => value !== undefined))];
   const categoryIds = revision.categoryId ? [revision.categoryId] : journalCategoryIds;
 
   /*
@@ -91,193 +58,55 @@ export default async function TransactionDetailPage({
    * (buildspec.md §9.4), and an edit always writes a replacement journal — so editing one would
    * start moving today's balance with a record that exists precisely so it never does.
    */
-  const isHistoryOnly = transaction.accountingScope === "history_only";
-  const editable =
-    (kind === "expense" || kind === "income") && transaction.status === "posted" && !isHistoryOnly;
+  const editable = (kind === "expense" || kind === "income") && transaction.status === "posted" && !isHistoryOnly;
+  const notEditable = isDeleted
+    ? "This record is in Trash. Restore it before editing."
+    : (kind === "expense" || kind === "income") && isHistoryOnly
+      ? "History-only records can't be edited yet. They never touch a balance, so there is nothing to correct in the ledger."
+      : "This kind of record can't be edited yet. Move it to Trash and record it again.";
 
-  const accountLines = accountRows(kind, detail.accounts);
-  const editedBadge =
-    changes > 0 ? (
-      <Badge tone="primary">
-        Edited {changes} {changes === 1 ? "time" : "times"}
-      </Badge>
-    ) : null;
-  const trashControl = isDeleted ? (
-    <RestoreTransactionButton
-      transactionId={transaction.id}
-      expectedRevision={transaction.currentRevision}
-    />
-  ) : transaction.status === "posted" ? (
-    <DeleteTransactionButton
-      transactionId={transaction.id}
-      expectedRevision={transaction.currentRevision}
-      label={title}
-    />
-  ) : null;
+  const currentAccountId = detail.accounts[0]?.id;
+  const currentCategory = categoryIds[0] ?? (kind === "income" ? "income" : "uncategorized");
+  const categoryKind = kind === "income" ? "income" : "expense";
 
-  return (
-    <Shell>
-      <PageHeader
-        title={title}
-        subtitle={`${labelForKind(kind)} · ${localDate}`}
-        action={<Link href="/transactions">All transactions</Link>}
-      />
+  const data: DetailData = {
+    id: transaction.id,
+    kind,
+    kindLabel: labelForKind(kind),
+    title: revision.merchantName ?? labelForKind(kind),
+    status: transaction.status,
+    precision: labelForPrecision(revision.occurredAt.precision) ?? null,
+    historyOnly: isHistoryOnly,
+    changes: detail.revisionCount - 1,
+    amount: revision.displayAmount,
+    date: localDate,
+    accountLines: accountRows(kind, detail.accounts),
+    categories: categoryIds.map(categoryName),
+    merchant: revision.merchantName ?? null,
+    notes: revision.notes ?? null,
+    revision: transaction.currentRevision,
+    notEditable: editable ? null : notEditable,
+    edit: editable
+      ? {
+          kind: kind as "expense" | "income",
+          accountId: currentAccountId ?? "",
+          amountValue: plainAmount(revision.displayAmount),
+          date: localDate,
+          maxDate: laterOf(localDate, localDateOf(Date.now(), service.zone)),
+          categoryId: currentCategory,
+          merchantName: revision.merchantName ?? "",
+          notes: revision.notes ?? "",
+          splitCount: journalCategoryIds.length,
+          accounts: accountOptions(service, kind, currentAccountId),
+          // The record's own category always stays on offer, even if archived or of the other kind.
+          categories: categories
+            .filter((c) => (c.archivedAt === undefined && c.kind === categoryKind) || c.id === currentCategory)
+            .map((c) => ({ id: c.id, name: c.name })),
+        }
+      : null,
+  };
 
-      <Columns layout="main-aside">
-        <Stack>
-          <Card
-            title="Details"
-            action={
-              trashControl ? (
-                <div className={cx(styles.passThrough, styles.belowWide)}>{trashControl}</div>
-              ) : null
-            }
-          >
-            <div style={{ display: "grid", gap: "var(--space-4)" }}>
-              <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
-                <Badge tone={statusTone(transaction.status)}>
-                  {labelForStatus(transaction.status)}
-                </Badge>
-                {/* §16: a date-only record must never be shown as though the time were known. */}
-                {precisionNote ? <Badge>{precisionNote}</Badge> : null}
-                {isHistoryOnly ? <Badge tone="warning">History only</Badge> : null}
-                {editedBadge ? (
-                  <span className={cx(styles.passThrough, styles.belowWide)}>{editedBadge}</span>
-                ) : null}
-              </div>
-
-              <dl className={cx(styles.list, styles.listWide)}>
-                <Row label="Type">{labelForKind(kind)}</Row>
-                <Row label="Amount">
-                  <Amount value={revision.displayAmount} srLabel={labelForKind(kind)} />
-                </Row>
-                <Row label="Date">{localDate}</Row>
-                {accountLines.map((row) => (
-                  <Row key={row.label} label={row.label} className={styles.belowWide}>
-                    {row.value}
-                  </Row>
-                ))}
-                {categoryIds.length > 0 ? (
-                  <Row label={categoryIds.length > 1 ? "Categories" : "Category"}>
-                    {categoryIds.map(categoryName).join(", ")}
-                  </Row>
-                ) : null}
-                {revision.merchantName ? (
-                  <Row label={kind === "income" ? "Payer" : "Merchant"}>{revision.merchantName}</Row>
-                ) : null}
-                {revision.notes ? <Row label="Notes">{revision.notes}</Row> : null}
-              </dl>
-
-              {isHistoryOnly ? (
-                <p style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
-                  Kept for categories and estimates only. It is from before the tracked balance
-                  starts, so it is never added to today&apos;s balance.
-                </p>
-              ) : null}
-            </div>
-          </Card>
-
-          {editable ? (
-            <Card title="Edit">
-              <EditTransactionForm
-                data={{
-                  id: transaction.id,
-                  kind,
-                  revision: transaction.currentRevision,
-                  accountId: detail.accounts[0]?.id ?? "",
-                  amountValue: formatMoney(revision.displayAmount, {
-                    withCode: false,
-                    grouping: false,
-                  }),
-                  date: localDate,
-                  maxDate: laterOf(localDate, localDateOf(Date.now(), service.zone)),
-                  categoryId: categoryIds[0] ?? (kind === "income" ? "income" : "uncategorized"),
-                  merchantName: revision.merchantName ?? "",
-                  notes: revision.notes ?? "",
-                  splitCount: journalCategoryIds.length,
-                }}
-                accounts={accountOptions(service, kind, detail.accounts[0]?.id)}
-                categories={categories
-                  .filter((c) => c.archivedAt === undefined || categoryIds.includes(c.id))
-                  .map((c) => ({ id: c.id, name: c.name }))}
-              />
-            </Card>
-          ) : (
-            <Card>
-              <InfoNote>
-                {isDeleted
-                  ? "This record is in Trash. Restore it before editing."
-                  : (kind === "expense" || kind === "income") && isHistoryOnly
-                    ? "History-only records can't be edited yet. They never touch a balance, so there is nothing to correct in the ledger."
-                    : "This kind of record can't be edited yet. Delete it and record it again."}
-              </InfoNote>
-            </Card>
-          )}
-        </Stack>
-
-        {/*
-          The desktop's second column. `wide-only` keeps it out of the single-column layout, where
-          the Details card above already shows all of this.
-        */}
-        <Stack sticky>
-          {accountLines.length > 0 ? (
-            <div className="wide-only">
-              <Card title="Accounts">
-                <dl className={cx(styles.list, styles.listEnd)}>
-                  {accountLines.map((row) => (
-                    <Row key={row.label} label={row.label}>
-                      {row.value}
-                    </Row>
-                  ))}
-                </dl>
-              </Card>
-            </div>
-          ) : null}
-
-          <div className="wide-only">
-            <Card
-              title="History"
-              action={trashControl}
-              footer={
-                isDeleted
-                  ? "Deleted records keep their history and can be restored."
-                  : transaction.status === "posted"
-                    ? "Deleting moves it to Trash. Its effect on your balances is reversed straight " +
-                      "away, and you can restore it from Trash."
-                    : undefined
-              }
-            >
-              <div style={{ display: "grid", gap: "var(--space-3)", justifyItems: "start" }}>
-                {editedBadge ?? (
-                  <span style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
-                    Not edited since it was recorded.
-                  </span>
-                )}
-                <Link href="/activity">See every change in Activity</Link>
-              </div>
-            </Card>
-          </div>
-        </Stack>
-      </Columns>
-    </Shell>
-  );
-}
-
-function Row({
-  label,
-  children,
-  className,
-}: {
-  label: string;
-  children: ReactNode;
-  className?: string | undefined;
-}) {
-  return (
-    <div className={cx(styles.row, className)}>
-      <dt className={styles.label}>{label}</dt>
-      <dd className={styles.value}>{children}</dd>
-    </div>
-  );
+  return <DetailView data={data} />;
 }
 
 /** Words the account lines the way the owner thinks about each kind of record. */
@@ -286,21 +115,10 @@ function accountRows(kind: string, accounts: Detail["accounts"]): { label: strin
   if (kind === "transfer") {
     const from = accounts.filter((a) => a.direction === "out").map((a) => a.name);
     const to = accounts.filter((a) => a.direction === "in").map((a) => a.name);
-    return [
-      ...(from.length > 0 ? [{ label: "From", value: from.join(", ") }] : []),
-      ...(to.length > 0 ? [{ label: "To", value: to.join(", ") }] : []),
-    ];
+    return [...(from.length > 0 ? [{ label: "From", value: from.join(", ") }] : []), ...(to.length > 0 ? [{ label: "To", value: to.join(", ") }] : [])];
   }
   const label =
-    kind === "expense"
-      ? "Paid from"
-      : kind === "income"
-        ? "Received into"
-        : kind === "refund"
-          ? "Refunded to"
-          : accounts.length > 1
-            ? "Accounts"
-            : "Account";
+    kind === "expense" ? "Paid from" : kind === "income" ? "Received into" : kind === "refund" ? "Refunded to" : accounts.length > 1 ? "Accounts" : "Account";
   return [{ label, value: accounts.map((a) => a.name).join(", ") }];
 }
 
@@ -312,35 +130,10 @@ function accountRows(kind: string, accounts: Detail["accounts"]): { label: strin
 function accountOptions(service: FinanceService, kind: string, currentAccountId: string | undefined) {
   return service
     .listAccounts({ includeArchived: true })
+    .filter((a) => a.isUserVisible)
     .filter((a) => a.archivedAt === undefined || a.id === currentAccountId)
     .filter((a) => kind !== "income" || a.kind === "asset" || a.id === currentAccountId)
-    .map((a) => ({
-      id: a.id,
-      name: a.name,
-      currency: a.currency.code,
-      archived: a.archivedAt !== undefined,
-    }));
-}
-
-function labelForStatus(status: string): string {
-  switch (status) {
-    case "posted":
-      return "Posted";
-    case "pending":
-      return "Pending";
-    case "deleted":
-      return "In Trash";
-    case "merged":
-      return "Merged";
-    default:
-      return status;
-  }
-}
-
-function statusTone(status: string): "success" | "warning" | "neutral" {
-  if (status === "posted") return "success";
-  if (status === "deleted") return "warning";
-  return "neutral";
+    .map((a) => ({ id: a.id, name: a.name, currency: a.currency.code, archived: a.archivedAt !== undefined }));
 }
 
 /** ISO dates order correctly as plain strings. */

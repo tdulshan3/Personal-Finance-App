@@ -1,1724 +1,285 @@
 /*
- * Design tokens, base styles and component classes.
- *
- * buildspec.md §13: "Create a calm, rounded, blue, iOS-inspired interface with clear financial
- * information. Use translucent glass and blur sparingly for navigation, sheets, and a few summary
- * surfaces. Keep transaction tables and forms readable on mostly solid surfaces."
- *
- * The look follows the current iOS design language: a grouped grey background, white inset cards
- * with large continuous corners, capsule buttons, filled inputs, hairline separators, and a floating
- * glass tab bar. Glass is limited to the tab bar and the Home summary card; everything that holds a
- * table or a form is solid.
- *
- * No Tailwind, no web fonts, no images: plain CSS custom properties keep the phone-hosted bundle
- * small. The font stack is the platform's own UI face — San Francisco on Apple devices, Roboto on
- * Android — so nothing is downloaded and nothing proprietary is shipped.
- *
- * ── Contrast ────────────────────────────────────────────────────────────────────────────────────
- * Measured with a WCAG 2.x relative-luminance script. Every colour used for text is >= 4.5:1 on
- * every surface it can land on. "fill" is --surface-sunken composited over the surface beneath it.
- *
- * iOS's own system colours do NOT pass as text (systemBlue #007AFF is 4.02:1 on white, the
- * "accessible" green #248A3D is 4.40:1, the 60 %-alpha secondary label is 3.44:1), so each hue was
- * darkened (light) or lightened (dark) along its own HSL lightness until the worst pair passed.
- *
- *   LIGHT                          card    page    fill    own tint   glass card (worst)
- *   --text            #000000     21.00   18.82     —         —        17.31
- *   --text-secondary  #636366      5.99    5.37    5.19       —         4.94   (fill on page 4.69,
- *                                                                               fill on fill 4.55)
- *   --primary         #0064D2      5.59    5.01    4.85      4.68       4.61
- *   --success         #1F7735      5.60    5.02    4.86      4.75       4.62
- *   --danger          #CC0014      5.87    5.26    5.09      4.70       4.84
- *   --warning         #C03200      5.68    5.09    4.92      4.69       4.68
- *   white on --primary-fill #0071E3   4.70        white on --primary   5.59
- *
- *   DARK                           card    page   raised   fill    own tint   glass card (worst)
- *   --text            #FFFFFF     17.01   21.00     —        —        —        13.04
- *   --text-secondary  #AEAEB2      7.69    9.50    6.30     5.81      —         5.90  (fill on fill 4.52)
- *   --primary         #47A0FF      6.27    7.74    5.14     4.73     4.67       4.81
- *   --success         #30D158      8.42   10.39    6.89     6.35     5.90       6.45
- *   --danger          #FF6F66      6.25    7.72    5.12     4.72     4.72       4.79
- *   --warning         #FF9F0A      8.28   10.22    6.78     6.25     5.81       6.34
- *   white on --primary-fill #0071E3   4.70        --primary-contrast #00142E on --primary   6.79
- *
- * Two consequences worth knowing before changing a colour:
- *
- *  1. The soft tints (--primary-soft, --danger-soft, …) are OPAQUE. They are exactly the accent at
- *     12 % (light) / 18 % (dark) composited over the card colour. A translucent tint shifts when it
- *     is stacked on the grey page or on a fill, and the accent text on top of it then drops below
- *     4.5:1 — measured with these same accents: 4.23 for a chip on the light page, 4.10 for a badge
- *     on a light fill, 3.58 for a badge on a dark fill. Opaque tints make "accent on its own tint"
- *     one fixed, measured pair.
- *
- *  2. In dark mode no single blue can be both readable text on a #1C1C1E card (needs luminance
- *     >= 0.23) and a background for white text (needs <= 0.18). So there are two tokens:
- *     --primary is the accent for TEXT and ICONS, --primary-fill is the accent for FILLED surfaces
- *     and always carries --on-primary-fill (white). --primary-contrast stays what it always was:
- *     the colour that is readable on top of --primary itself.
+ * The app's own CSS. Everything that looks like an Apple control comes from the kit stylesheets
+ * (src/ui/looks.css loads macOS on desktops and iOS on phones); nothing here restyles a `mac-*` or
+ * `ios-*` class. What is left is the one thing the kits do not draw — charts — and a few
+ * placements of the app's own content.
  */
 
+/* --- Chart tokens --------------------------------------------------------------------------- */
+/*
+ * Series colours are the dataviz skill's validated reference steps, re-checked against both kits'
+ * card surfaces with scripts/validate_palette.js: spending blue and income aqua pass every check in
+ * light and dark. Light aqua sits under 3:1 on white, so every chart carries a legend, direct
+ * labels or tooltips, and a table for screen readers. Chrome (grid, axis text) uses each kit's own
+ * separator and label colours, so it follows the look and the scheme by itself.
+ */
 :root {
-  color-scheme: light;
-
-  /* iOS grouped background, cards, fills, labels, separator — light */
-  --bg: #f2f2f7;
-  --surface: #ffffff;
-  --surface-raised: #ffffff;
-  --surface-sunken: rgb(118 118 128 / 12%);
-  --text: #000000;
-  --text-secondary: #636366;
-  /* Decorative marks only (disclosure chevrons). Far too faint for text. */
-  --text-tertiary: rgb(60 60 67 / 30%);
-  --border: #c6c6c8;
-
-  /* Accent */
-  --primary: #0064d2;
-  --primary-fill: #0071e3;
-  --on-primary-fill: #ffffff;
-  --primary-contrast: #ffffff;
-  --primary-soft: #e0ecfa;
-  --focus-ring: #0064d2;
-
-  /* Status */
-  --danger: #cc0014;
-  --danger-soft: #f9e0e3;
-  --success: #1f7735;
-  --success-soft: #e4efe7;
-  --warning: #c03200;
-  --warning-soft: #f7e6e0;
-  --overlay: rgb(0 0 0 / 40%);
-
-  /* Glass. §13: blur is clipped to small surfaces and always has a solid fallback. */
-  --glass-bg: rgb(255 255 255 / 72%);
-  --glass-border: rgb(255 255 255 / 65%);
-  --glass-highlight: rgb(255 255 255 / 90%);
-  --glass-rim: rgb(0 0 0 / 7%);
-  --tabbar-bg: rgb(255 255 255 / 80%);
-  --bg-scrim: rgb(242 242 247 / 88%);
-
-  /* Charts. Graphics need 3:1 against the card, not text's 4.5:1; each of these clears it. */
-  --chart-income: #1f8a3d;
-  --chart-spending: #0071e3;
-  --chart-1: #0071e3;
-  --chart-2: #d9480f;
-  --chart-3: #1f8a3d;
-  --chart-4: #8a3ffc;
-  --chart-5: #c2255c;
-  --chart-6: #0b7285;
-  --chart-7: #a26a00;
-  --chart-8: #6b7280;
-  /* Soft light inside the Home summary card. Capped so text on it stays above 4.5:1 (see above). */
-  --glow-a: rgb(0 113 227 / 12%);
-  --glow-b: rgb(88 86 214 / 10%);
-  --glow-c: rgb(50 173 230 / 10%);
-
-  /* §13: "an 8 dp spacing rhythm with 4 dp for small adjustments" */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --space-7: 48px;
-
-  /* Continuous-corner cards, smaller radii for whatever sits inside them, capsules for controls. */
-  --radius-card: 26px;
-  --radius-input: 14px;
-  --radius-inner: 10px;
-  --radius-pill: 999px;
-
-  /*
-   * iOS text styles. rem rather than px so the browser's own text-size setting still scales the
-   * interface, the way Dynamic Type would.
-   *   Large Title 34/41 · Title 2 22/28 · Title 3 20/25 · Headline 17 semibold · Body 17/22 ·
-   *   Subheadline 15/20 · Footnote 13/18 · Caption 12/16
-   */
-  --font-xs: 0.75rem;
-  --font-footnote: 0.8125rem;
-  --font-sm: 0.9375rem;
-  --font-base: 1.0625rem;
-  --font-title3: 1.25rem;
-  --font-lg: 1.375rem;
-  --font-xl: 2.125rem;
-
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 4%);
-  --shadow-float: 0 12px 32px rgb(0 0 0 / 14%), 0 2px 8px rgb(0 0 0 / 6%);
-  --shadow-sheet: 0 -2px 24px rgb(0 0 0 / 12%);
-
-  /* §13: "48 dp minimum touch targets" */
-  --touch-target: 48px;
-  --control-height: 50px;
-  --hairline: 1px;
-
-  /* Large Title. Eases down on a 360 px phone so a greeting and a trailing button share one line. */
-  --large-title-size: clamp(1.75rem, 8.6vw, var(--font-xl));
-
-  /* The floating tab bar: its height, and how far it sits above the bottom edge. */
-  --tabbar-height: 66px;
-  --tabbar-offset: max(12px, calc(env(safe-area-inset-bottom, 0px) - 8px));
-  /*
-   * For anything that sticks to the bottom of the screen (the Assistant's composer): how far up it
-   * must sit to clear the bar with 8 px of air, NOT counting the home-indicator inset. Callers add
-   * `env(safe-area-inset-bottom)` themselves, so that term is subtracted here and the sum comes out
-   * at exactly the top of the bar plus 8 px on every device.
-   */
-  --tabbar-clearance: calc(
-    var(--tabbar-height) + var(--tabbar-offset) + 8px - env(safe-area-inset-bottom, 0px)
-  );
-
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-
-  accent-color: var(--primary-fill);
+  --chart-spending: #2a78d6;
+  --chart-income: #1baf7a;
+  --chart-muted: #8e8e93;
+  --chart-alert: #d03b3b;
 }
-
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    color-scheme: dark;
-
-    --bg: #000000;
-    --surface: #1c1c1e;
-    --surface-raised: #2c2c2e;
-    --surface-sunken: rgb(118 118 128 / 24%);
-    --text: #ffffff;
-    --text-secondary: #aeaeb2;
-    --text-tertiary: rgb(235 235 245 / 30%);
-    --border: #38383a;
-
-    --primary: #47a0ff;
-    --primary-fill: #0071e3;
-    --on-primary-fill: #ffffff;
-    --primary-contrast: #00142e;
-    --primary-soft: #243447;
-    --focus-ring: #47a0ff;
-
-    --danger: #ff6f66;
-    --danger-soft: #452b2b;
-    --success: #30d158;
-    --success-soft: #203d28;
-    --warning: #ff9f0a;
-    --warning-soft: #45341a;
-    --overlay: rgb(0 0 0 / 56%);
-
-    --glass-bg: rgb(44 44 46 / 62%);
-    --glass-border: rgb(255 255 255 / 10%);
-    --glass-highlight: rgb(255 255 255 / 16%);
-    --glass-rim: rgb(0 0 0 / 40%);
-    --tabbar-bg: rgb(30 30 32 / 78%);
-    --bg-scrim: rgb(0 0 0 / 85%);
-
-    --chart-income: #30d158;
-    --chart-spending: #0a84ff;
-    --chart-1: #0a84ff;
-    --chart-2: #ff9f0a;
-    --chart-3: #30d158;
-    --chart-4: #bf5af2;
-    --chart-5: #ff6482;
-    --chart-6: #40c8e0;
-    --chart-7: #ffd60a;
-    --chart-8: #98989d;
-    --glow-a: rgb(10 132 255 / 22%);
-    --glow-b: rgb(94 92 230 / 18%);
-    --glow-c: rgb(100 210 255 / 12%);
-
-    --shadow-card: none;
-    --shadow-float: 0 12px 32px rgb(0 0 0 / 60%), 0 2px 8px rgb(0 0 0 / 40%);
-    --shadow-sheet: 0 -2px 24px rgb(0 0 0 / 45%);
+    --chart-spending: #3987e5;
+    --chart-income: #199e70;
+    --chart-muted: #98989d;
+    --chart-alert: #d03b3b;
   }
 }
-
-/* The owner's explicit choice beats the system setting in both directions. */
 :root[data-theme="dark"] {
-  color-scheme: dark;
-
-  --bg: #000000;
-  --surface: #1c1c1e;
-  --surface-raised: #2c2c2e;
-  --surface-sunken: rgb(118 118 128 / 24%);
-  --text: #ffffff;
-  --text-secondary: #aeaeb2;
-  --text-tertiary: rgb(235 235 245 / 30%);
-  --border: #38383a;
-
-  --primary: #47a0ff;
-  --primary-fill: #0071e3;
-  --on-primary-fill: #ffffff;
-  --primary-contrast: #00142e;
-  --primary-soft: #243447;
-  --focus-ring: #47a0ff;
-
-  --danger: #ff6f66;
-  --danger-soft: #452b2b;
-  --success: #30d158;
-  --success-soft: #203d28;
-  --warning: #ff9f0a;
-  --warning-soft: #45341a;
-  --overlay: rgb(0 0 0 / 56%);
-
-  --glass-bg: rgb(44 44 46 / 62%);
-  --glass-border: rgb(255 255 255 / 10%);
-  --glass-highlight: rgb(255 255 255 / 16%);
-  --glass-rim: rgb(0 0 0 / 40%);
-  --tabbar-bg: rgb(30 30 32 / 78%);
-  --bg-scrim: rgb(0 0 0 / 85%);
-
-  --chart-income: #30d158;
-  --chart-spending: #0a84ff;
-  --chart-1: #0a84ff;
-  --chart-2: #ff9f0a;
-  --chart-3: #30d158;
-  --chart-4: #bf5af2;
-  --chart-5: #ff6482;
-  --chart-6: #40c8e0;
-  --chart-7: #ffd60a;
-  --chart-8: #98989d;
-  --glow-a: rgb(10 132 255 / 22%);
-  --glow-b: rgb(94 92 230 / 18%);
-  --glow-c: rgb(100 210 255 / 12%);
-
-  --shadow-card: none;
-  --shadow-float: 0 12px 32px rgb(0 0 0 / 60%), 0 2px 8px rgb(0 0 0 / 40%);
-  --shadow-sheet: 0 -2px 24px rgb(0 0 0 / 45%);
+  --chart-spending: #3987e5;
+  --chart-income: #199e70;
+  --chart-muted: #98989d;
 }
 
-/* A true hairline where the screen can draw one; a whole pixel where it cannot. */
-@media (min-resolution: 2dppx) {
+@media (min-width: 744px) and (pointer: fine), (min-width: 744px) and (min-height: 500.02px) {
   :root {
-    --hairline: 0.5px;
+    --chart-grid: var(--mac-separator);
+    --chart-text: var(--mac-label-primary);
+    --chart-text-secondary: var(--mac-label-secondary);
+    --chart-surface: var(--mac-window-bg);
+    --chart-tip-bg: var(--mac-window-bg);
+    --chart-font-size: 11px;
+  }
+}
+@media (max-width: 743.98px), (pointer: coarse) and (max-height: 500px) {
+  :root {
+    --chart-grid: var(--ios-separator);
+    --chart-text: var(--ios-label-primary);
+    --chart-text-secondary: var(--ios-label-secondary);
+    --chart-surface: var(--ios-grouped-bg-secondary);
+    --chart-tip-bg: var(--ios-grouped-bg-secondary);
+    --chart-font-size: 12px;
   }
 }
 
-/* ── Base ────────────────────────────────────────────────────────────────────────────────────── */
-
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
+/* --- Charts --------------------------------------------------------------------------------- */
+.pfa-chart {
+  position: relative;
+  min-width: 0;
+  width: 100%;
 }
-
-html {
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
+.pfa-chart svg {
+  display: block;
+  overflow: visible;
 }
-
-html,
-body {
-  margin: 0;
-  padding: 0;
+.pfa-chart text {
+  font-size: var(--chart-font-size);
+  fill: var(--chart-text-secondary);
+  font-variant-numeric: tabular-nums;
 }
-
-body {
-  min-height: 100dvh;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-sans);
-  font-size: var(--font-base);
-  line-height: 1.35;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-tap-highlight-color: transparent;
-  /* Clears the floating tab bar, its offset from the edge, and leaves a little air above it. */
-  padding-bottom: calc(var(--tabbar-height) + var(--tabbar-offset) + var(--space-5));
-}
-
-h1,
-h2,
-h3 {
-  margin: 0;
-  text-wrap: balance;
-  overflow-wrap: anywhere;
-}
-
-/* Large Title */
-h1 {
-  font-size: var(--large-title-size);
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: -0.022em;
-}
-
-/* Title 2 */
-h2 {
-  font-size: var(--font-lg);
-  font-weight: 700;
-  line-height: 1.27;
-  letter-spacing: -0.018em;
-}
-
-/* Headline */
-h3 {
-  font-size: var(--font-base);
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.01em;
-}
-
-p {
-  margin: 0;
-}
-
-a {
-  color: var(--primary);
-  text-decoration: none;
-}
-
-@media (hover: hover) {
-  a:hover {
-    text-decoration: underline;
-  }
-}
-
-button,
-input,
-select,
-textarea {
-  font: inherit;
-  color: inherit;
-  letter-spacing: inherit;
-}
-
-button {
-  touch-action: manipulation;
-}
-
-code,
-kbd,
-samp {
-  font-family: var(--font-mono);
-  font-size: 0.9em;
-}
-
-/* A bare <code> in running text gets a quiet fill; anything styled inline keeps its own. */
-:where(p, li, span, dd) > :where(code) {
-  background: var(--surface-sunken);
-  border-radius: 6px;
-  padding: 1px 6px;
-}
-
-summary {
-  cursor: pointer;
-}
-
-/*
- * Plain form elements a page writes by hand pick up the same filled look as the components in
- * src/ui/form.tsx. `:where()` keeps this at zero specificity, so any class or inline style wins.
- */
-:where(
-    input:not(
-        [type="checkbox"],
-        [type="radio"],
-        [type="range"],
-        [type="file"],
-        [type="color"],
-        [type="hidden"],
-        [type="submit"],
-        [type="button"],
-        [type="reset"],
-        [type="image"]
-      ),
-    select,
-    textarea
-  ) {
-  min-height: var(--control-height);
-  padding: 0 var(--space-4);
-  border: 1px solid transparent;
-  border-radius: var(--radius-input);
-  background: var(--surface-sunken);
-  color: var(--text);
-  font-size: var(--font-base);
-}
-
-:where(textarea) {
-  padding-block: var(--space-3);
-  min-height: 112px;
-  line-height: 1.35;
-  resize: vertical;
-}
-
-::placeholder {
-  /* iOS's own placeholder grey is ~2:1. This one is the secondary label, which passes. */
-  color: var(--text-secondary);
-  opacity: 1;
-}
-
-/* A single visible focus treatment everywhere, for keyboard and switch access (§13). */
-:focus-visible {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-:where(a:not([class])):focus-visible {
-  border-radius: 6px;
-}
-
-:where(button, a, input, select, textarea):focus:not(:focus-visible) {
+.pfa-chart [data-hit] {
   outline: none;
 }
-
-/*
- * §13: "tabular digits for money". Without this, a column of amounts jitters as digits change
- * width, which makes scanning a ledger unpleasant and comparison harder.
- */
-.money {
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1;
-  white-space: nowrap;
+.pfa-chart [data-hit]:focus-visible {
+  stroke: var(--chart-text);
+  stroke-width: 1;
 }
-
-.visually-hidden {
+.pfa-chart__tip {
   position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
-}
-
-/* Small text helpers for pages: Footnote and Caption in the secondary label colour. */
-.footnote {
-  font-size: var(--font-footnote);
-  line-height: 1.38;
-  color: var(--text-secondary);
-}
-
-.caption {
-  font-size: var(--font-xs);
-  line-height: 1.33;
-  color: var(--text-secondary);
-}
-
-/* ── Page frame ──────────────────────────────────────────────────────────────────────────────── */
-
-.shell {
-  --shell-padding: var(--space-4);
-  max-width: 680px;
-  margin: 0 auto;
-  padding: calc(var(--space-5) + env(safe-area-inset-top, 0px))
-    max(var(--shell-padding), env(safe-area-inset-right, 0px)) var(--space-6)
-    max(var(--shell-padding), env(safe-area-inset-left, 0px));
-  display: grid;
-  /* One column that may shrink: without minmax(0, …) a long unbroken string widens the page. */
-  grid-template-columns: minmax(0, 1fr);
-  gap: 28px;
-}
-
-@media (min-width: 430px) {
-  .shell {
-    --shell-padding: 20px;
-  }
-}
-
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding-inline: 4px;
-  margin-top: var(--space-2);
-}
-
-.page-header-text {
-  display: grid;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.page-subtitle {
-  font-size: var(--font-footnote);
-  line-height: 1.38;
-  color: var(--text-secondary);
-}
-
-/* As tall as the title's first line, so a badge or a link centres on it rather than on the block. */
-.page-header-action {
-  flex: 0 0 auto;
-  min-height: calc(var(--large-title-size) * 1.2);
-  display: inline-flex;
-  align-items: center;
-}
-
-/* ── Cards: an iOS inset-grouped section ─────────────────────────────────────────────────────── */
-
-.card-section {
-  --card-padding: var(--space-4);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
-  min-width: 0;
-}
-
-@media (min-width: 390px) {
-  .card-section {
-    --card-padding: 20px;
-  }
-}
-
-/* The title sits above the card, not in it, the way a grouped list names its sections. */
-.section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  min-height: 28px;
-  padding-inline: 6px;
-}
-
-.section-title {
-  font-size: var(--font-title3);
-  font-weight: 600;
-  line-height: 1.25;
-  letter-spacing: -0.015em;
-}
-
-.section-action {
-  flex: 0 0 auto;
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.section-footer {
-  padding-inline: var(--card-padding);
-  font-size: var(--font-footnote);
-  line-height: 1.38;
-  color: var(--text-secondary);
-}
-
-.card {
-  min-width: 0;
-  background: var(--surface);
-  border-radius: var(--radius-card);
-  padding: var(--card-padding);
-  box-shadow: var(--shadow-card);
-}
-
-/*
- * A hand-written list that ends a card keeps a separator under its last row, which iOS never
- * draws. Scoped to exactly that case so it cannot reach into a page's own layout.
- */
-.card > ul:last-child > li:last-child {
-  border-bottom: 0 !important;
-  padding-bottom: 0 !important;
-}
-
-/*
- * Glass.
- *
- * §13: "Never blur readable text or put every list row behind an expensive live blur." Blur is
- * opt-in per surface, and switched off entirely when the owner asks for reduced transparency —
- * see the fallbacks at the end of this file.
- */
-.glass {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
-}
-
-/* The Home summary card: translucent, softly lit from inside, with a specular top edge. */
-.card-glass {
-  padding: calc(var(--card-padding) + 4px);
-  background:
-    radial-gradient(130% 120% at 0% 0%, var(--glow-a), transparent 58%),
-    radial-gradient(120% 130% at 100% 100%, var(--glow-b), transparent 60%),
-    radial-gradient(90% 90% at 100% 0%, var(--glow-c), transparent 55%),
-    var(--glass-bg);
-  box-shadow:
-    inset 0 1px 0 0 var(--glass-highlight),
-    0 0 0 var(--hairline) var(--glass-rim),
-    0 10px 30px rgb(0 0 0 / 6%);
-}
-
-/* ── Lists: rows with hairlines inset from the leading edge ──────────────────────────────────── */
-
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Rows bring their own vertical padding, so a list that fills a card pulls up to its edges. */
-.card > .list:first-child {
-  margin-top: calc(6px - var(--card-padding, 0px));
-}
-
-.card > .list:last-child {
-  margin-bottom: calc(6px - var(--card-padding, 0px));
-}
-
-.list-row {
-  --list-inset: 0px;
-  position: relative;
-  display: block;
-}
-
-.list-row.has-leading {
-  --list-inset: 42px;
-}
-
-/* The separator starts under the text, not under the icon, and runs out to the card's edge. */
-.list-row:not(:last-child)::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  inset-inline-start: var(--list-inset);
-  inset-inline-end: calc(-1 * var(--card-padding, 0px));
-  border-bottom: var(--hairline) solid var(--border);
-  pointer-events: none;
-}
-
-.list-row-content {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-height: var(--touch-target);
-  padding-block: 11px;
-  color: inherit;
-  text-decoration: none;
-}
-
-a.list-row-content {
-  margin-inline: min(0px, calc(6px - var(--card-padding, 0px)));
-  padding-inline: max(0px, calc(var(--card-padding, 0px) - 6px));
-  border-radius: var(--radius-input);
-  transition: background-color 0.15s ease;
-}
-
-a.list-row-content:hover {
-  text-decoration: none;
-}
-
-a.list-row-content:active {
-  background: var(--surface-sunken);
-}
-
-a.list-row-content:focus-visible {
-  outline-offset: -3px;
-}
-
-.list-row-leading {
-  flex: 0 0 30px;
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
+  z-index: 2;
+  min-width: 140px;
+  padding: 8px 10px;
   border-radius: 8px;
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-
-.list-row-leading[data-tone="success"] {
-  background: var(--success-soft);
-  color: var(--success);
-}
-
-.list-row-leading[data-tone="warning"] {
-  background: var(--warning-soft);
-  color: var(--warning);
-}
-
-.list-row-leading[data-tone="danger"] {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.list-row-leading[data-tone="neutral"] {
-  background: var(--surface-sunken);
-  color: var(--text-secondary);
-}
-
-.list-row-body {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.list-row-subtitle {
-  font-size: var(--font-footnote);
-  line-height: 1.38;
-  color: var(--text-secondary);
-}
-
-.list-row-trailing {
-  flex: 0 0 auto;
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--text-secondary);
-}
-
-.list-row-chevron {
-  flex: 0 0 auto;
-  color: var(--text-tertiary);
-  margin-right: -4px;
-}
-
-/* ── Amounts, stats, badges, notes, empty state ──────────────────────────────────────────────── */
-
-.amount {
-  font-weight: 600;
-  color: var(--text);
-}
-
-/* Colour is a second cue only: the minus sign and the screen-reader label carry the meaning. */
-.amount-negative {
-  color: var(--danger);
-}
-
-.amount-muted {
-  color: var(--text-secondary);
-}
-
-.amount-large {
-  font-size: clamp(1.75rem, 8.4vw, var(--font-xl));
-  font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: -0.025em;
-}
-
-.stat {
-  display: grid;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.stat-label {
-  font-size: var(--font-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.stat-hint {
-  font-size: var(--font-footnote);
-  line-height: 1.38;
-  color: var(--text-secondary);
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  max-width: 100%;
-  padding: 3px 10px;
-  border-radius: var(--radius-pill);
-  background: var(--surface-sunken);
-  color: var(--text-secondary);
-  font-size: var(--font-footnote);
-  font-weight: 600;
-  line-height: 1.38;
+  background: var(--chart-tip-bg);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.18), 0 6px 20px rgba(0, 0, 0, 0.16);
+  color: var(--chart-text);
+  font-size: var(--chart-font-size);
+  line-height: 1.35;
+  pointer-events: none;
   white-space: nowrap;
 }
-
-.badge-primary {
-  background: var(--primary-soft);
-  color: var(--primary);
+.pfa-chart__tip-title {
+  color: var(--chart-text-secondary);
+  margin-bottom: 4px;
 }
-
-.badge-success {
-  background: var(--success-soft);
-  color: var(--success);
-}
-
-.badge-warning {
-  background: var(--warning-soft);
-  color: var(--warning);
-}
-
-.badge-danger {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.note {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin: 0;
-  padding: var(--space-3) 14px;
-  border-radius: var(--radius-input);
-  font-size: var(--font-sm);
-  line-height: 1.4;
-}
-
-.note > svg {
-  margin-top: 1px;
-}
-
-.note-body {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.note-info {
-  background: var(--primary-soft);
-  color: var(--text);
-}
-
-.note-info > svg {
-  color: var(--primary);
-}
-
-.note-danger {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.empty-state {
-  display: grid;
-  gap: var(--space-2);
-  justify-items: center;
-  text-align: center;
-  padding: var(--space-5) var(--space-4);
-  color: var(--text-secondary);
-}
-
-.empty-state-icon {
-  width: 56px;
-  height: 56px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--surface-sunken);
-  color: var(--text-secondary);
-  margin-bottom: var(--space-1);
-}
-
-.empty-state-title {
-  font-size: var(--font-title3);
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  color: var(--text);
-}
-
-.empty-state-body {
-  max-width: 34ch;
-  font-size: var(--font-sm);
-}
-
-.empty-state-action {
-  margin-top: var(--space-2);
-  min-height: var(--touch-target);
-  display: inline-flex;
-  align-items: center;
-  font-weight: 600;
-}
-
-/* ── Buttons ─────────────────────────────────────────────────────────────────────────────────── */
-
-.btn {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  min-height: var(--control-height);
-  padding: 0 22px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--primary);
-  font-size: var(--font-base);
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
-  text-align: center;
-  text-decoration: none;
-  white-space: nowrap;
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
-  transition:
-    transform 0.12s ease,
-    filter 0.12s ease,
-    opacity 0.12s ease,
-    background-color 0.15s ease;
-}
-
-/*
- * A page may draw a button shorter than 48 px to fit a dense row. The touch target still reaches
- * 48 px: this grows above and below only when the button is shorter than that, and never otherwise.
- */
-.btn::before {
-  content: "";
-  position: absolute;
-  inset-inline: 0;
-  inset-block: min(0px, calc((100% - var(--touch-target)) / 2));
-}
-
-.btn:hover {
-  text-decoration: none;
-}
-
-.btn-primary {
-  background: var(--primary-fill);
-  color: var(--on-primary-fill);
-}
-
-.btn-secondary {
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-
-.btn-danger {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.btn-ghost {
-  padding: 0 var(--space-3);
-  background: transparent;
-  color: var(--primary);
-}
-
-.btn-block {
-  display: flex;
-  width: 100%;
-}
-
-@media (hover: hover) {
-  .btn:hover:not(:disabled) {
-    filter: brightness(0.95);
-  }
-
-  .btn-ghost:hover:not(:disabled) {
-    filter: none;
-    background: var(--primary-soft);
-  }
-}
-
-.btn:active:not(:disabled) {
-  transform: scale(0.98);
-  filter: brightness(0.9);
-}
-
-.btn-ghost:active:not(:disabled) {
-  filter: none;
-  opacity: 0.6;
-}
-
-.btn:disabled,
-.btn[aria-disabled="true"] {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.btn[aria-busy="true"] {
-  cursor: progress;
-}
-
-/* ── Form controls: filled, no heavy border ──────────────────────────────────────────────────── */
-
-.field {
-  display: grid;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.field-label {
-  padding-inline: 2px;
-  font-size: var(--font-sm);
-  font-weight: 600;
-}
-
-.field-hint,
-.field-error {
-  padding-inline: 2px;
-  font-size: var(--font-footnote);
-  line-height: 1.38;
-}
-
-.field-hint {
-  color: var(--text-secondary);
-}
-
-.field-error {
-  color: var(--danger);
-  font-weight: 500;
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 18px;
-}
-
-.control {
-  display: block;
-  width: 100%;
-  min-width: 0;
-  min-height: var(--control-height);
-  margin: 0;
-  padding: 0 var(--space-4);
-  border: 1px solid transparent;
-  border-radius: var(--radius-input);
-  background: var(--surface-sunken);
-  color: var(--text);
-  /* 17 px. Anything under 16 px makes iOS Safari zoom the page when the field takes focus. */
-  font-size: var(--font-base);
-  line-height: 1.3;
-  -webkit-appearance: none;
-  appearance: none;
-  transition: box-shadow 0.15s ease;
-}
-
-.control:focus-visible {
-  outline-offset: 1px;
-}
-
-.control:disabled {
-  opacity: 0.5;
-}
-
-.control[aria-invalid="true"] {
-  box-shadow: inset 0 0 0 1.5px var(--danger);
-}
-
-/* iOS Safari centres the value of a date field; min-height above stops it collapsing when empty. */
-input[type="date"].control,
-input[type="time"].control,
-input[type="datetime-local"].control {
-  text-align: start;
-}
-
-.control::-webkit-date-and-time-value {
-  text-align: start;
-}
-
-.control::-webkit-search-cancel-button {
-  cursor: pointer;
-}
-
-.select-wrap {
-  position: relative;
-  display: block;
-  width: 100%;
-  min-width: 0;
-}
-
-.select-wrap > .control {
-  padding-inline-end: 44px;
-  cursor: pointer;
-  text-overflow: ellipsis;
-}
-
-.select-chevron {
-  position: absolute;
-  inset-inline-end: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-secondary);
-  pointer-events: none;
-}
-
-.money-field {
-  position: relative;
+.pfa-chart__tip-row {
   display: flex;
   align-items: center;
-  min-width: 0;
+  gap: 6px;
 }
-
-.money-field-code {
-  position: absolute;
-  inset-inline-start: var(--space-4);
-  color: var(--text-secondary);
-  font-size: var(--font-sm);
-  font-weight: 500;
-  pointer-events: none;
+.pfa-chart__tip-row strong {
+  font-variant-numeric: tabular-nums;
 }
-
-.money-field > .control {
-  text-align: right;
+.pfa-chart__key {
+  display: inline-block;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  flex: none;
 }
-
-/* ── Quick links: a scrollable row of tinted capsules ────────────────────────────────────────── */
-
-.chip-row {
+.pfa-chart__swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+}
+.pfa-legend {
   display: flex;
-  gap: var(--space-2);
-  min-width: 0;
-  /* Runs edge to edge, so a half-visible chip says "this scrolls". */
-  margin-inline: calc(-1 * var(--shell-padding, 0px));
-  padding-inline: var(--shell-padding, 0px);
-  /* Room for the chips' 48 px touch target, which is taller than they look. */
-  margin-block: -4px;
-  padding-block: 4px;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scroll-snap-type: x proximity;
-  scroll-padding-inline: var(--shell-padding, 0px);
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  color: var(--chart-text-secondary);
+  font-size: var(--chart-font-size);
 }
-
-.chip-row::-webkit-scrollbar {
-  display: none;
-}
-
-.chip {
-  position: relative;
-  flex: 0 0 auto;
+.pfa-legend li {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 40px;
-  padding: 0 var(--space-4) 0 14px;
-  border-radius: var(--radius-pill);
-  background: var(--primary-soft);
-  color: var(--primary);
-  font-size: var(--font-sm);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  text-decoration: none;
+}
+
+/* Ranked horizontal bars (where the money went): label and value as text, the bar beneath. */
+.pfa-bars {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pfa-bars__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: baseline;
+}
+.pfa-bars__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  scroll-snap-align: start;
-  transition:
-    transform 0.12s ease,
-    filter 0.12s ease;
+}
+.pfa-bars__value {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pfa-bars__track {
+  grid-column: 1 / -1;
+  height: 6px;
+}
+.pfa-bars__fill {
+  display: block;
+  height: 6px;
+  min-width: 2px;
+  border-radius: 0 3px 3px 0;
+  background: var(--chart-spending);
+}
+.pfa-bars__row[data-income] .pfa-bars__fill {
+  background: var(--chart-income);
 }
 
-.chip::before {
-  content: "";
-  position: absolute;
-  inset: -4px 0;
+/* --- Content the kits do not draw -------------------------------------------------------- */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-.chip:hover {
-  text-decoration: none;
+/* A transaction or message quoted as the bank wrote it. */
+.pfa-quote {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
-@media (hover: hover) {
-  .chip:hover {
-    filter: brightness(0.95);
-  }
+/* Amounts in running text and rows line their digits up. */
+.pfa-money {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.chip:active {
-  transform: scale(0.97);
-  filter: brightness(0.9);
+/* The single headline figure of a page: proportional digits, the kit's own large type. */
+.pfa-hero {
+  display: block;
+  font-variant-numeric: proportional-nums;
+  overflow-wrap: anywhere;
 }
 
-/* ── Tab bar: a floating glass capsule ───────────────────────────────────────────────────────── */
-
-.tabbar-wrap {
-  position: fixed;
-  inset-inline: 0;
-  bottom: 0;
-  z-index: 20;
-  display: flex;
-  justify-content: center;
-  padding: 0 max(12px, env(safe-area-inset-right, 0px)) var(--tabbar-offset)
-    max(12px, env(safe-area-inset-left, 0px));
-  /* Only the bar itself takes touches; the strip either side of it stays scrollable. */
-  pointer-events: none;
+/* Chat: the conversation is the page; the composer stays under it. */
+.pfa-chat {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
-
-/* Content dissolves into the page colour as it passes under the bar, so labels stay legible. */
-.tabbar-wrap::before {
-  content: "";
-  position: absolute;
-  inset: -28px 0 0;
-  z-index: -1;
-  background: linear-gradient(to bottom, transparent, var(--bg-scrim) 72%);
-  pointer-events: none;
-}
-
-.tabbar {
-  --glass-solid: var(--surface-raised);
-  pointer-events: auto;
-  width: 100%;
-  max-width: 520px;
-  display: flex;
-  align-items: stretch;
-  gap: 2px;
-  padding: 5px;
-  border-radius: var(--radius-pill);
-  background: var(--tabbar-bg);
-  box-shadow:
-    inset 0 1px 0 0 var(--glass-highlight),
-    0 0 0 var(--hairline) var(--glass-rim),
-    var(--shadow-float);
-}
-
-.tabbar-item {
-  /* Sized by its label, then sharing what is left: "Transactions" needs more room than "Plan". */
-  flex: 1 1 auto;
-  min-width: var(--touch-target);
-  min-height: 54px;
+.pfa-chat__row {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  padding: 6px var(--space-2) 5px;
-  border-radius: var(--radius-pill);
-  color: var(--text-secondary);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  line-height: 1.1;
-  letter-spacing: 0.005em;
-  text-decoration: none;
-  white-space: nowrap;
-  transition:
-    background-color 0.2s ease,
-    color 0.2s ease,
-    transform 0.12s ease;
-}
-
-.tabbar-item:hover {
-  text-decoration: none;
-}
-
-@media (hover: hover) {
-  .tabbar-item:hover {
-    color: var(--text);
-  }
-}
-
-.tabbar-item:active {
-  transform: scale(0.95);
-}
-
-.tabbar-item[aria-current="page"] {
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-
-.tabbar-item:focus-visible {
-  outline-offset: -3px;
-}
-
-/* ── Columns: one list on a phone, regions side by side on a desktop ─────────────────────────── */
-
-.columns {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 28px;
-  align-items: start;
+  gap: 8px;
   min-width: 0;
 }
-
-/*
- * On a phone the stacks dissolve, so every card is a direct item of `.columns` and `order` can move
- * a card from the second stack up between cards of the first.
- */
-.columns > .stack {
-  display: contents;
+.pfa-chat__row[data-from="owner"] {
+  align-items: flex-end;
 }
-
-.stack {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 28px;
-  min-width: 0;
+.pfa-chat__bubble {
+  max-width: min(78%, 560px);
+  padding: 8px 12px;
+  border-radius: 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
-
-/* ── Live updates: silent while healthy, visible when the link is down ───────────────────────── */
-
-.live-status {
+.pfa-chat__note {
+  text-align: center;
+}
+.pfa-typing {
   display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-footnote);
-  font-weight: 600;
-  color: var(--text-secondary);
+  gap: 4px;
+  padding: 4px 2px;
 }
-
-.live-dot {
-  width: 8px;
-  height: 8px;
+.pfa-typing span {
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--text-secondary);
-  flex: none;
+  background: currentColor;
+  opacity: 0.4;
+  animation: pfa-typing 1.2s infinite ease-in-out;
 }
-
-.live-status[data-state="live"] .live-dot {
-  background: var(--success);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 60%, transparent);
-  animation: live-pulse 2.4s ease-out infinite;
+.pfa-typing span:nth-child(2) { animation-delay: 0.15s; }
+.pfa-typing span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes pfa-typing {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 0.8; transform: translateY(-3px); }
 }
-
-.live-status[data-state="offline"] .live-dot {
-  background: var(--warning);
+@media (prefers-reduced-motion: reduce) {
+  .pfa-typing span { animation: none; }
 }
-
-@keyframes live-pulse {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 55%, transparent);
+@media (min-width: 744px) and (pointer: fine), (min-width: 744px) and (min-height: 500.02px) {
+  .pfa-chat__row[data-from="owner"] .pfa-chat__bubble {
+    background: var(--mac-accent);
+    color: #fff;
   }
-  70%,
-  100% {
-    box-shadow: 0 0 0 7px transparent;
-  }
-}
-
-/* A phone has no sidebar to carry the indicator, so a lost link surfaces as a pill above the bar. */
-.live-toast {
-  position: fixed;
-  left: 50%;
-  bottom: calc(var(--tabbar-height) + var(--tabbar-offset) + 12px);
-  transform: translateX(-50%);
-  z-index: 25;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 8px 14px;
-  border-radius: var(--radius-pill);
-  background: var(--surface-raised);
-  color: var(--text);
-  font-size: var(--font-footnote);
-  font-weight: 600;
-  box-shadow:
-    0 0 0 var(--hairline) var(--glass-rim),
-    var(--shadow-float);
-  pointer-events: none;
-  white-space: nowrap;
-}
-
-.live-toast .live-dot {
-  background: var(--warning);
-}
-
-/* ── Sidebar: the desktop's navigation. Hidden until there is room for it. ───────────────────── */
-
-/* `desktop-only` follows the sidebar (1024 px); `wide-only` follows the columns (1200 px). */
-.sidebar,
-.desktop-only,
-.wide-only {
-  display: none;
-}
-
-@media (min-width: 768px) {
-  .shell {
-    max-width: 760px;
+  .pfa-chat__row[data-from="assistant"] .pfa-chat__bubble {
+    background: var(--mac-fill-tertiary, rgba(0, 0, 0, 0.06));
   }
 }
-
-@media (min-width: 1024px) {
-  :root {
-    --sidebar-width: 272px;
-    /* No tab bar to clear: anything stuck to the bottom just keeps a comfortable margin. */
-    --tabbar-clearance: 24px;
-    --large-title-size: var(--font-xl);
+@media (max-width: 743.98px), (pointer: coarse) and (max-height: 500px) {
+  .pfa-chat__row[data-from="owner"] .pfa-chat__bubble {
+    background: var(--ios-accent);
+    color: var(--ios-on-accent);
   }
-
-  body.has-nav {
-    padding-left: var(--sidebar-width);
-    padding-bottom: 0;
-  }
-
-  .tabbar-wrap,
-  .live-toast,
-  .quick-links,
-  .phone-only {
-    display: none;
-  }
-
-  .desktop-only {
-    display: revert;
-  }
-
-  .sidebar {
-    --glass-solid: var(--surface);
-    position: fixed;
-    inset: 0 auto 0 0;
-    z-index: 20;
-    width: var(--sidebar-width);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-    padding: 28px 16px 20px;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    background: var(--sidebar-bg, var(--glass-bg));
-    box-shadow: inset calc(-1 * var(--hairline)) 0 0 0 var(--border);
-    -webkit-backdrop-filter: saturate(180%) blur(30px);
-    backdrop-filter: saturate(180%) blur(30px);
-  }
-
-  .sidebar-brand {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 0 10px;
-    font-size: 1.25rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    color: var(--text);
-    text-decoration: none;
-  }
-
-  .sidebar-brand:hover {
-    text-decoration: none;
-  }
-
-  .sidebar-mark {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-    display: grid;
-    place-items: center;
-    background: var(--primary-fill);
-    color: var(--on-primary-fill);
-    box-shadow: var(--shadow-card);
-    flex: none;
-  }
-
-  .sidebar-group {
-    display: grid;
-    gap: 2px;
-  }
-
-  .sidebar-label {
-    padding: 0 12px 6px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    color: var(--text-secondary);
-  }
-
-  .sidebar-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-height: 44px;
-    padding: 0 12px;
-    border-radius: 12px;
-    color: var(--text);
-    font-size: 0.9375rem;
-    font-weight: 500;
-    letter-spacing: -0.01em;
-    text-decoration: none;
-    transition:
-      background-color 0.15s ease,
-      color 0.15s ease;
-  }
-
-  .sidebar-item:hover {
-    text-decoration: none;
-    background: var(--fill, var(--surface-sunken));
-  }
-
-  .sidebar-item > svg {
-    color: var(--primary);
-    flex: none;
-  }
-
-  .sidebar-item[aria-current="page"] {
-    background: var(--primary-soft);
-    color: var(--primary);
-    font-weight: 600;
-  }
-
-  .sidebar-item:focus-visible {
-    outline-offset: -3px;
-  }
-
-  .sidebar-count {
-    margin-left: auto;
-    min-width: 22px;
-    height: 22px;
-    padding: 0 7px;
-    border-radius: var(--radius-pill);
-    display: inline-grid;
-    place-items: center;
-    background: var(--primary-fill);
-    color: var(--on-primary-fill);
-    font-size: 0.75rem;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .sidebar-footer {
-    margin-top: auto;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-3);
-    padding: var(--space-4) 8px 0;
-    border-top: var(--hairline) solid var(--border);
-  }
-
-  /* The page itself: wide enough to organise, never so wide that a row of text runs on. */
-  .shell {
-    --shell-padding: 40px;
-    max-width: 1240px;
-    padding: 44px var(--shell-padding) 72px;
-    gap: 32px;
-  }
-
-  .shell-narrow {
-    max-width: 760px;
-  }
-
-  .columns,
-  .stack {
-    gap: 32px;
-  }
-
-  /* The pre-unlock screens have no sidebar; centre their single card in the window instead. */
-  body:not(.has-nav) .shell {
-    min-height: 100dvh;
-    align-content: center;
-    max-width: 560px;
+  .pfa-chat__row[data-from="assistant"] .pfa-chat__bubble {
+    background: var(--ios-grouped-bg-secondary);
   }
 }
 
 /*
- * Columns start later than the sidebar. At 1024 px the sidebar leaves about 670 px of page, and
- * splitting that would squeeze the main column to the width of a small phone; until 1200 px the
- * page keeps one comfortable column (and therefore the phone's card order) beside the sidebar.
+ * Links in the app's own text take the accent colour, as both kits colour links; kit anchors (rows,
+ * sidebar items) carry their own classes and are left alone.
  */
-@media (min-width: 1200px) {
-  .columns > .stack {
-    display: grid;
-    align-content: start;
-  }
-
-  .columns-main-aside {
-    grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
-  }
-
-  .columns-aside-main {
-    grid-template-columns: minmax(320px, 1fr) minmax(0, 1.7fr);
-  }
-
-  .columns-halves {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .columns-thirds {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  /* `flip`: the first stack in the DOM is drawn second, and the track widths swap to match. */
-  .columns-flip > .stack:first-child {
-    order: 1;
-  }
-
-  .columns-aside-main.columns-flip {
-    grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
-  }
-
-  .columns-main-aside.columns-flip {
-    grid-template-columns: minmax(320px, 1fr) minmax(0, 1.7fr);
-  }
-
-  /*
-   * Keeps a column (a form, a summary) in view while the long one beside it scrolls. A pinned
-   * column taller than the window could never be scrolled to its own end, so it scrolls within
-   * itself instead; the negative margin and matching padding keep card shadows from being clipped.
-   */
-  .stack-sticky {
-    position: sticky;
-    top: 32px;
-    max-height: calc(100dvh - 64px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
-    margin: -8px;
-    padding: 8px;
-  }
-
-  .wide-only {
-    display: revert;
-  }
+@media (min-width: 744px) and (pointer: fine), (min-width: 744px) and (min-height: 500.02px) {
+  a:not([class]) { color: var(--mac-accent); text-decoration: none; }
+  a:not([class]):hover { text-decoration: underline; }
 }
-
-@media (min-width: 1440px) {
-  .shell {
-    max-width: 1320px;
-  }
-
-  .shell-narrow {
-    max-width: 800px;
-  }
-}
-
-/* ── Fallbacks: these stay last so they win over the glass rules above ───────────────────────── */
-
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .glass,
-  .card-glass,
-  .tabbar,
-  .sidebar {
-    background: var(--glass-solid, var(--surface));
-    border-color: var(--border);
-  }
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .glass,
-  .card-glass,
-  .tabbar,
-  .sidebar {
-    background: var(--glass-solid, var(--surface));
-    border-color: var(--border);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
-
-  .tabbar-wrap::before {
-    background: linear-gradient(to bottom, transparent, var(--bg) 72%);
-  }
-}
-
-:root[data-reduce-transparency="true"] :is(.glass, .card-glass, .tabbar, .sidebar) {
-  background: var(--glass-solid, var(--surface));
-  border-color: var(--border);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
-
-:root[data-reduce-transparency="true"] .tabbar-wrap::before {
-  background: linear-gradient(to bottom, transparent, var(--bg) 72%);
-}
-
-/* More contrast on request: surfaces get an edge, and glass becomes solid. */
-@media (prefers-contrast: more) {
-  .card,
-  .control,
-  .badge,
-  .chip,
-  .btn-secondary,
-  .btn-danger {
-    border: 1px solid var(--text-secondary);
-  }
-
-  .glass,
-  .card-glass,
-  .tabbar,
-  .sidebar {
-    background: var(--glass-solid, var(--surface));
-    border-color: var(--text-secondary);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
-  }
-
-  .btn:active:not(:disabled),
-  .chip:active,
-  .tabbar-item:active {
-    transform: none;
-  }
+@media (max-width: 743.98px), (pointer: coarse) and (max-height: 500px) {
+  a:not([class]) { color: var(--ios-accent); text-decoration: none; }
 }

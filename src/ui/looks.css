@@ -1,0 +1,7 @@
+/*
+ * The two Apple looks, each loaded only for its own screens (apple-ui-ux adaptive guide): the
+ * macOS stylesheet on desktops and tablets, the iOS one on phones. The queries are the same two as
+ * src/ui/look-shared.ts; keep them identical.
+ */
+@import url("./macos/macos.css") (min-width: 744px) and (pointer: fine), (min-width: 744px) and (min-height: 500.02px);
+@import url("./ios/ios.css") (max-width: 743.98px), (pointer: coarse) and (max-height: 500px);

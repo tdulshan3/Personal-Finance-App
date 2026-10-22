@@ -6,11 +6,8 @@ import { createReviewService } from "../../ingestion/review-service.ts";
 import { backgroundStatus, currentProcessor } from "../../server/background.ts";
 import { requireDb, requireService } from "../../server/runtime.ts";
 import { accessState } from "../../server/session.ts";
-import { Badge, Card, EmptyState, PageHeader, Shell } from "../../ui/primitives.tsx";
-import { ProcessButton } from "./process-button.tsx";
-import type { ReviewCardData } from "./review-card.tsx";
-import { ReviewCard } from "./review-card.tsx";
-import styles from "./review.module.css";
+import type { ReviewData, ReviewMessage } from "./review-view.tsx";
+import { ReviewView } from "./review-view.tsx";
 
 export const dynamic = "force-dynamic";
 
@@ -48,20 +45,18 @@ export default async function ReviewPage({
   const apart = new Set((typeof params.apart === "string" ? params.apart : "").split(",").filter(Boolean).slice(0, 40));
   const cards = review.listOpen(40, apart);
   const counts = currentProcessor()?.counts() ?? { staged: 0, waitingForModel: 0, openReviews: cards.length };
-  const status = backgroundStatus();
-  const today = localDateOf(Date.now(), service.zone);
+  const when = (instant: number) => new Date(instant).toLocaleString("en-GB", { timeZone: service.zone, dateStyle: "medium", timeStyle: "short" });
 
-  const accounts = service.listAccounts().map((a) => ({ id: a.id, name: a.name, currency: a.currency.code }));
-  const categories = service.listCategories().map((c) => ({ id: c.id, name: c.name }));
-
-  const toData = (card: (typeof cards)[number]): ReviewCardData => ({
+  const messages: ReviewMessage[] = cards.map((card) => ({
     eventId: card.eventId,
     kind: card.kind,
     kindLabel: KIND_LABELS[card.kind] ?? card.kind,
     postable: card.postable,
     sender: card.sender,
-    receivedLabel: new Date(card.receivedAt).toLocaleString("en-GB", { timeZone: service.zone, dateStyle: "medium", timeStyle: "short" }),
+    receivedLabel: when(card.receivedAt),
     sourceText: card.sourceText,
+    amountText: card.amount ? formatMoney(card.amount) : null,
+    amountBare: card.amount ? formatMoney(card.amount, { withCode: false }) : null,
     amountValue: card.amount ? formatMoney(card.amount, { withCode: false, grouping: false }) : "",
     currency: card.amount?.currency.code ?? null,
     merchantText: card.merchantText,
@@ -79,48 +74,29 @@ export default async function ReviewPage({
           accountName: card.balanceCheck.accountName,
           reported: formatMoney(card.balanceCheck.reported),
           projected: formatMoney(card.balanceCheck.projected),
-          difference: card.balanceCheck.reported.minor === card.balanceCheck.projected.minor
-            ? null
-            : formatMoney({ currency: card.balanceCheck.reported.currency, minor: card.balanceCheck.reported.minor - card.balanceCheck.projected.minor }, { signed: true }),
+          difference:
+            card.balanceCheck.reported.minor === card.balanceCheck.projected.minor
+              ? null
+              : formatMoney(
+                  { currency: card.balanceCheck.reported.currency, minor: card.balanceCheck.reported.minor - card.balanceCheck.projected.minor },
+                  { signed: true },
+                ),
         }
       : null,
     splitHref: card.pairedWith ? `/review?apart=${[...apart, card.eventId, card.pairedWith.eventId].join(",")}` : null,
-  });
+  }));
 
-  return (
-    <Shell>
-      <PageHeader title="Review" subtitle="Messages become transactions only when you say so." />
+  const data: ReviewData = {
+    messages,
+    counts,
+    checking: backgroundStatus().active,
+    today: localDateOf(Date.now(), service.zone),
+    accounts: service
+      .listAccounts()
+      .filter((a) => a.isUserVisible)
+      .map((a) => ({ id: a.id, name: a.name, currency: a.currency.code })),
+    categories: service.listCategories().map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
+  };
 
-      <Card>
-        <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", marginBottom: "var(--space-4)" }}>
-          <Badge tone={cards.length > 0 ? "primary" : "neutral"}>{cards.length} to review</Badge>
-          {counts.staged > 0 ? <Badge>{counts.staged} not read yet</Badge> : null}
-          {counts.waitingForModel > 0 ? (
-            <Badge tone="warning">{counts.waitingForModel} waiting for the model</Badge>
-          ) : null}
-          {status.active ? <Badge tone="success">Checking every minute</Badge> : <Badge tone="warning">Background checks off</Badge>}
-        </div>
-        <ProcessButton />
-      </Card>
-
-      {cards.length === 0 ? (
-        <Card>
-          <EmptyState
-            title="Nothing to review"
-            body={
-              accounts.length === 0
-                ? "Add an account first, then messages from the senders you enabled will appear here."
-                : "New messages from the senders you enabled in Settings appear here within moments of arriving."
-            }
-          />
-        </Card>
-      ) : (
-        <ul className={styles.grid} role="list">
-          {cards.map((card) => (
-            <ReviewCard key={card.eventId} data={toData(card)} accounts={accounts} categories={categories} today={today} />
-          ))}
-        </ul>
-      )}
-    </Shell>
-  );
+  return <ReviewView data={data} />;
 }

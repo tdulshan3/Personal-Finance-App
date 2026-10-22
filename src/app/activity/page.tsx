@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { asNumber, asOptionalText, asText } from "../../core/data/driver.ts";
@@ -7,28 +6,15 @@ import { localDateOf } from "../../core/domain/time.ts";
 import { TransactionStatus } from "../../core/domain/transaction.ts";
 import { requireDb, requireService } from "../../server/runtime.ts";
 import { accessState } from "../../server/session.ts";
-import { labelForKind, labelForPrecision } from "../../ui/labels.ts";
-import {
-  Amount,
-  Badge,
-  Card,
-  Columns,
-  EmptyState,
-  PageHeader,
-  Shell,
-  Stack,
-} from "../../ui/primitives.tsx";
-import { RestoreTransactionButton } from "../transactions/row-actions.tsx";
+import { iconForCategory, iconForKind, labelForKind } from "../../ui/labels.ts";
+import { accountNamesFor } from "../transactions/ledger-rows.ts";
+import type { ActivityData } from "./activity-view.tsx";
+import { ActivityView } from "./activity-view.tsx";
 
 export const dynamic = "force-dynamic";
 
 const EVENT_LIMIT = 100;
 const TRASH_LIMIT = 50;
-/*
- * On a desktop Trash sits beside the timeline and stays in view while it scrolls — but only while
- * it is short. A pinned column taller than the window could never be scrolled to its end.
- */
-const STICKY_TRASH_ROWS = 4;
 
 /**
  * Activity and Trash.
@@ -37,9 +23,6 @@ const STICKY_TRASH_ROWS = 4;
  * restore, conflict explanations." This is the read side: the audit trail as sentences, what an
  * edit actually changed, and Trash with its restore. §15 makes `audit_events` append-only, so
  * nothing on this screen can alter what it shows.
- *
- * On a desktop the timeline is the main column and Trash the one beside it; a phone reads them in
- * the same order, top to bottom.
  */
 export default async function ActivityPage() {
   const access = await accessState();
@@ -47,7 +30,9 @@ export default async function ActivityPage() {
   if (access.kind !== "ready") redirect("/unlock");
 
   const service = requireService();
-  const categoryNames = new Map(service.listCategories(true).map((c) => [c.id, c.name]));
+  const categories = service.listCategories(true);
+  const categoryNames = new Map(categories.map((c) => [c.id, c.name]));
+  const categoryOf = new Map(categories.map((c) => [c.id, c]));
 
   /*
    * `rowid` breaks ties in write order. Two changes can share a millisecond, and the audit id is
@@ -67,21 +52,18 @@ export default async function ActivityPage() {
     const before = revisionIn(parseJson(asOptionalText(row.before_json, "before_json")));
     const after = revisionIn(parseJson(asOptionalText(row.after_json, "after_json")));
     const subject = after ?? before;
+    const recordedAt = asNumber(row.recorded_at, "recorded_at");
     return {
       id: asText(row.id, "id"),
+      actor: labelForActor(asText(row.actor_kind, "actor_kind")),
       actorKind: asText(row.actor_kind, "actor_kind"),
-      modelIdentity: asOptionalText(row.model_identity, "model_identity"),
+      modelIdentity: asOptionalText(row.model_identity, "model_identity") ?? null,
       origin: asText(row.origin, "origin"),
       reason: asText(row.reason, "reason"),
-      when: new Date(asNumber(row.recorded_at, "recorded_at")).toLocaleString("en-GB", {
-        timeZone: service.zone,
-        dateStyle: "medium",
-        timeStyle: "short",
-      }),
-      transactionId: transactionRefIn(parseJson(asText(row.entity_refs_json, "entity_refs_json"))),
-      subject: subject
-        ? [textOf(subject.merchantName), amountText(subject)].filter(Boolean).join(" · ")
-        : "",
+      at: recordedAt,
+      when: new Date(recordedAt).toLocaleString("en-GB", { timeZone: service.zone, dateStyle: "medium", timeStyle: "short" }),
+      transactionId: transactionRefIn(parseJson(asText(row.entity_refs_json, "entity_refs_json"))) ?? null,
+      subject: subject ? [textOf(subject.merchantName), amountText(subject)].filter(Boolean).join(" · ") : "",
       changes: before && after ? describeChanges(before, after, categoryNames) : [],
     };
   });
@@ -92,156 +74,34 @@ export default async function ActivityPage() {
     includeHistoryOnly: true,
     limit: TRASH_LIMIT,
   });
+  const accountNames = accountNamesFor(requireDb(), trash);
 
-  return (
-    <Shell>
-      <PageHeader title="Activity" subtitle="Every change to your records, newest first." />
+  const data: ActivityData = {
+    today: localDateOf(Date.now(), service.zone),
+    events,
+    eventLimitReached: events.length === EVENT_LIMIT,
+    trash: trash.map((row) => {
+      const category = row.categoryId ? categoryOf.get(row.categoryId) : undefined;
+      return {
+        id: row.id,
+        kind: row.kind,
+        kindLabel: labelForKind(row.kind),
+        title: row.merchantName ?? labelForKind(row.kind),
+        categoryName: row.categoryId ? (category?.name ?? row.categoryId) : null,
+        icon: category ? iconForCategory(category.iconKey, category.kind) : iconForKind(row.kind),
+        account: accountNames.get(row.id) ?? null,
+        date: row.occurredLocalDate,
+        // §16: a date-only record must never be shown as though the time were known.
+        // Trash lists dates, never times, so §16's precision note would say nothing here.
+        labels: row.accountingScope === "history_only" ? "History only" : "",
+        amount: row.amount,
+        revision: row.revision,
+      };
+    }),
+    trashLimitReached: trash.length === TRASH_LIMIT,
+  };
 
-      <Columns layout="main-aside">
-        <Stack>
-          <Card title="Recent changes">
-            {events.length === 0 ? (
-              <EmptyState
-                title="Nothing has changed yet"
-                body="Once you add, edit or delete a record, each change is listed here with who made it."
-              />
-            ) : (
-              <>
-                <ul style={listStyle}>
-                  {events.map((event) => (
-                    <li key={event.id} style={rowStyle}>
-                      <div style={{ display: "grid", gap: "var(--space-1)", minWidth: 0 }}>
-                        <span style={{ fontWeight: 560, overflowWrap: "anywhere" }}>{event.reason}</span>
-                        {event.subject ? (
-                          <span style={{ fontSize: "var(--font-sm)", overflowWrap: "anywhere" }}>
-                            {event.subject}
-                          </span>
-                        ) : null}
-                        {event.changes.map((change) => (
-                          <span
-                            key={change}
-                            style={{
-                              fontSize: "var(--font-sm)",
-                              color: "var(--text-secondary)",
-                              overflowWrap: "anywhere",
-                            }}
-                          >
-                            {change}
-                          </span>
-                        ))}
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "var(--space-2)",
-                            flexWrap: "wrap",
-                            alignItems: "center",
-                          }}
-                        >
-                          <Badge tone={toneForActor(event.actorKind)}>
-                            {labelForActor(event.actorKind)}
-                          </Badge>
-                          <span
-                            style={{
-                              fontSize: "var(--font-sm)",
-                              color: "var(--text-secondary)",
-                              overflowWrap: "anywhere",
-                            }}
-                          >
-                            {event.origin}
-                            {event.modelIdentity ? ` · ${event.modelIdentity}` : ""}
-                          </span>
-                        </div>
-                      </div>
-                      <div
-                        style={{
-                          display: "grid",
-                          gap: "var(--space-2)",
-                          justifyItems: "end",
-                          flexShrink: 0,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: "var(--font-sm)",
-                            color: "var(--text-secondary)",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {event.when}
-                        </span>
-                        {event.transactionId ? (
-                          <Link href={`/transactions/${event.transactionId}`}>View</Link>
-                        ) : null}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                {events.length === EVENT_LIMIT ? (
-                  <p style={footnoteStyle}>Showing the latest {EVENT_LIMIT} changes.</p>
-                ) : null}
-              </>
-            )}
-          </Card>
-        </Stack>
-
-        <Stack sticky={trash.length <= STICKY_TRASH_ROWS}>
-          <Card title="Trash">
-            {trash.length === 0 ? (
-              <EmptyState
-                title="Trash is empty"
-                body="Deleted transactions wait here. Their effect on your balances is already reversed, and restoring one brings it back."
-              />
-            ) : (
-              <>
-                <ul style={listStyle}>
-                  {trash.map((row) => {
-                    const precisionNote = labelForPrecision(row.occurredPrecision);
-                    return (
-                      <li key={row.id} style={rowStyle}>
-                        <div style={{ display: "grid", gap: "var(--space-1)", minWidth: 0 }}>
-                          <Link
-                            href={`/transactions/${row.id}`}
-                            style={{ fontWeight: 560, overflowWrap: "anywhere" }}
-                          >
-                            {row.merchantName ?? labelForKind(row.kind)}
-                          </Link>
-                          <span style={{ fontSize: "var(--font-sm)", color: "var(--text-secondary)" }}>
-                            {row.occurredLocalDate} · {labelForKind(row.kind)}
-                            {row.categoryId
-                              ? ` · ${categoryNames.get(row.categoryId) ?? row.categoryId}`
-                              : ""}
-                          </span>
-                          <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
-                            {/* §16: a date-only record must never be shown as though the time were known. */}
-                            {precisionNote ? <Badge>{precisionNote}</Badge> : null}
-                            {row.accountingScope === "history_only" ? (
-                              <Badge tone="warning">History only</Badge>
-                            ) : null}
-                          </div>
-                        </div>
-                        <div style={{ display: "grid", gap: "var(--space-2)", justifyItems: "end" }}>
-                          <Amount value={row.amount} srLabel={labelForKind(row.kind)} />
-                          <RestoreTransactionButton
-                            transactionId={row.id}
-                            expectedRevision={row.revision}
-                          />
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-                {trash.length === TRASH_LIMIT ? (
-                  <p style={footnoteStyle}>
-                    Showing the first {TRASH_LIMIT}. <Link href="/transactions?view=trash">See all of Trash</Link>
-                  </p>
-                ) : null}
-              </>
-            )}
-          </Card>
-        </Stack>
-      </Columns>
-    </Shell>
-  );
+  return <ActivityView data={data} />;
 }
 
 /* -------------------------------------------------------------------------------------------- */
@@ -349,32 +209,3 @@ function labelForActor(kind: string): string {
       return kind;
   }
 }
-
-function toneForActor(kind: string): "neutral" | "primary" | "warning" {
-  if (kind === "agent") return "primary";
-  if (kind === "import") return "warning";
-  return "neutral";
-}
-
-const listStyle = {
-  listStyle: "none",
-  margin: 0,
-  padding: 0,
-  display: "grid",
-  gap: "var(--space-4)",
-} as const;
-
-const rowStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: "var(--space-4)",
-  paddingBottom: "var(--space-4)",
-  borderBottom: "1px solid var(--border)",
-} as const;
-
-const footnoteStyle = {
-  marginTop: "var(--space-4)",
-  fontSize: "var(--font-sm)",
-  color: "var(--text-secondary)",
-} as const;

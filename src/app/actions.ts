@@ -4,10 +4,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { isFinanceError } from "../core/domain/errors.ts";
-import { AccountType } from "../core/domain/ledger.ts";
-import { parseMajorUnits, requireCurrency } from "../core/domain/money.ts";
+import { parseMajorUnits } from "../core/domain/money.ts";
 import { dateOnlyTime } from "../core/domain/time.ts";
-import { initialise, lock, requireDb, requireService, unlock } from "../server/runtime.ts";
+import { initialise, lock, requireService, unlock } from "../server/runtime.ts";
 import { accessState, endSession, startSession } from "../server/session.ts";
 
 /**
@@ -71,64 +70,6 @@ export async function lockAction(): Promise<void> {
   lock("Locked by the owner");
   await endSession();
   redirect("/unlock");
-}
-
-/* -------------------------------------------------------------------------------------------- */
-/* Accounts                                                                                       */
-/* -------------------------------------------------------------------------------------------- */
-
-export async function createAccountAction(
-  _prev: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  await requireReady();
-  const service = requireService();
-
-  try {
-    const currency = requireCurrency(String(formData.get("currency") ?? "LKR"));
-    const limitText = String(formData.get("creditLimit") ?? "").trim();
-
-    /*
-     * buildspec.md §9.4 requires a verified balance *and* the time it was observed. An opening
-     * balance is optional here: leaving it blank is the honest choice when the owner does not know
-     * it yet, and §9.4 explicitly warns against inventing one.
-     *
-     * Everything is parsed before anything is written, and the two writes share one transaction.
-     * Otherwise a bad opening balance would leave the account behind, and the owner's retry would
-     * create a second one with the same name.
-     */
-    const openingText = String(formData.get("opening") ?? "").trim();
-    const observedOn = String(formData.get("openingDate") ?? "").trim();
-    if (openingText.length > 0 && observedOn.length === 0) {
-      return { error: "An opening balance needs the date it was observed." };
-    }
-    const opening = openingText.length > 0 ? parseMajorUnits(currency, openingText) : undefined;
-    const creditLimit = limitText.length > 0 ? parseMajorUnits(currency, limitText) : undefined;
-
-    requireDb().transaction(() => {
-      const account = service.createAccount({
-        name: String(formData.get("name") ?? ""),
-        type: String(formData.get("type") ?? AccountType.BANK) as AccountType,
-        currency,
-        institution: emptyToUndefined(formData.get("institution")),
-        // buildspec.md §10: a limit is recorded beside the account, never as a balance.
-        ...(creditLimit ? { creditLimit } : {}),
-      });
-      if (opening) {
-        service.setOpeningBalance({
-          accountId: account.id,
-          amount: opening,
-          occurredAt: dateOnlyTime(observedOn, service.zone),
-        });
-      }
-    });
-  } catch (error) {
-    return { error: describe(error) };
-  }
-
-  revalidatePath("/accounts");
-  revalidatePath("/");
-  return { ok: true };
 }
 
 /* -------------------------------------------------------------------------------------------- */
@@ -222,31 +163,8 @@ export async function createTransactionAction(
     return { error: describe(error) };
   }
 
-  revalidatePath("/transactions");
-  revalidatePath("/");
-  redirect("/transactions");
-}
-
-export async function deleteTransactionAction(formData: FormData): Promise<void> {
-  await requireReady();
-  const service = requireService();
-  service.deleteTransaction({
-    transactionId: String(formData.get("transactionId") ?? ""),
-    expectedRevision: Number(formData.get("expectedRevision") ?? 0),
-  });
-  revalidatePath("/transactions");
-  revalidatePath("/");
-}
-
-export async function restoreTransactionAction(formData: FormData): Promise<void> {
-  await requireReady();
-  const service = requireService();
-  service.restoreTransaction({
-    transactionId: String(formData.get("transactionId") ?? ""),
-    expectedRevision: Number(formData.get("expectedRevision") ?? 0),
-  });
-  revalidatePath("/transactions");
-  revalidatePath("/");
+  for (const path of ["/transactions", "/", "/accounts", "/bills", "/plan"]) revalidatePath(path);
+  return { ok: true };
 }
 
 function emptyToUndefined(value: FormDataEntryValue | null): string | undefined {

@@ -124,42 +124,26 @@ export function LiveSync() {
     };
   }, [router]);
 
-  return <LiveToast />;
+  return null;
 }
 
-const LABELS = { live: "Live", connecting: "Connecting…", offline: "Offline", off: "Paused" } as const;
-
-/** The sidebar's indicator. Colour is never the only cue: the word changes too. */
-export function LiveStatus() {
+/**
+ * What the page header should say about the live link, or null while it is healthy.
+ *
+ * The macOS title bar and the iOS navigation bar show it as their subtitle (the apple-ui-ux kits'
+ * place for live status). A reconnect that takes a second is not news; one that takes four is.
+ */
+export function useLiveProblem(): string | null {
   const state = useSyncExternalStore(liveStore.subscribe, liveStore.get, liveStore.getServer);
-  return (
-    <span className="live-status" data-state={state} role="status" title="Updates from your other devices and your phone's messages appear here as they happen.">
-      <span className="live-dot" aria-hidden="true" />
-      {LABELS[state]}
-    </span>
-  );
-}
-
-/** Phones have no sidebar, so there the link is silent while healthy and speaks up only when down. */
-function LiveToast() {
-  const state = useSyncExternalStore(liveStore.subscribe, liveStore.get, liveStore.getServer);
-  const [visible, setVisible] = useState(false);
-
-  // A reconnect that takes a second is not news; one that takes four is.
+  const [shown, setShown] = useState(false);
   useEffect(() => {
     if (state === "live" || state === "off") {
-      setVisible(false);
+      setShown(false);
       return;
     }
-    const timer = setTimeout(() => setVisible(true), 4_000);
+    const timer = setTimeout(() => setShown(true), 4_000);
     return () => clearTimeout(timer);
   }, [state]);
-
-  if (!visible) return null;
-  return (
-    <div className="live-toast" role="status">
-      <span className="live-dot" aria-hidden="true" />
-      {state === "offline" ? "Not updating live" : "Reconnecting…"}
-    </div>
-  );
+  if (!shown) return null;
+  return state === "offline" ? "Not updating live" : "Reconnecting…";
 }

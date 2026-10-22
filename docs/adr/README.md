@@ -21,6 +21,7 @@ ADR spells out which.
 | [0008](0008-bind-the-ledger-to-the-lan.md) | Bound to the LAN by owner choice, accepting a cleartext passphrase until TLS lands | amends 0007 |
 | [0009](0009-assistant-rules-first-and-proposal-boundary.md) | Assistant answers by rules first; the model can only draft proposals, and only the owner's Confirm executes one | §14.1 tool calling, §14.4 60 s turn |
 | [0010](0010-live-updates-over-sse.md) | Live updates: one SSE stream carrying only a version number, driven by SQLite's `total_changes()` | — (fills §13 "offline/loading states", §18 minimisation) |
+| [0011](0011-adaptive-apple-interface.md) | One app, two Apple looks: macOS on desktops, iOS on phones, from the vendored apple-ui-ux kit | §13 visual tokens (the look, not the requirements) |
 
 ## Known conflicts without an ADR yet
 

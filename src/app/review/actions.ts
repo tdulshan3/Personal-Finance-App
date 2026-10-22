@@ -22,9 +22,13 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong.";
 }
 
+/*
+ * The access check runs before each `try`: `redirect` works by throwing, and a catch would show the
+ * owner "NEXT_REDIRECT" instead of sending them to the unlock screen.
+ */
 export async function acceptReviewAction(_prev: ReviewState, formData: FormData): Promise<ReviewState> {
+  const svc = await review();
   try {
-    const svc = await review();
     const text = (key: string) => String(formData.get(key) ?? "").trim();
     svc.accept({
       eventId: text("eventId"),
@@ -37,26 +41,30 @@ export async function acceptReviewAction(_prev: ReviewState, formData: FormData)
       notes: text("notes") || undefined,
       pairedEventId: text("pairedEventId") || undefined,
     });
-    revalidatePath("/review");
-    revalidatePath("/transactions");
-    revalidatePath("/");
+    for (const path of ["/review", "/transactions", "/", "/accounts", "/bills", "/plan"]) revalidatePath(path);
     return { ok: "Recorded." };
   } catch (error) {
     return { error: describe(error) };
   }
 }
 
-export async function ignoreReviewAction(formData: FormData): Promise<void> {
+/** Ignore or Dismiss: the message stays staged as evidence but never becomes a transaction. */
+export async function ignoreReviewAction(_prev: ReviewState, formData: FormData): Promise<ReviewState> {
   const svc = await review();
-  svc.ignore(String(formData.get("eventId") ?? ""));
-  revalidatePath("/review");
-  revalidatePath("/");
+  try {
+    svc.ignore(String(formData.get("eventId") ?? ""));
+    revalidatePath("/review");
+    revalidatePath("/");
+    return { ok: "Ignored." };
+  } catch (error) {
+    return { error: describe(error) };
+  }
 }
 
 /** "Process now": runs the rules (and the model, if reachable) over anything waiting. */
 export async function processNowAction(_prev: ReviewState, _formData: FormData): Promise<ReviewState> {
+  await review();
   try {
-    await review();
     const processor = currentProcessor();
     if (!processor) return { error: "Background processing is not running. Lock and unlock once." };
     const report = await processor.processPending({ limit: 100 });
