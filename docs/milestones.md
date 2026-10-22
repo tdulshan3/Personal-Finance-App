@@ -3,16 +3,19 @@
 A living checklist of `buildspec.md` §21's milestones M0–M7, remapped onto the stack this project
 actually uses (see the [ADRs](adr/)).
 
-**Last checked:** 2026-09-20, at commit `a6773f3`.
+**Last checked:** 2026-10-22, on the working tree after `4d795ad` (the adaptive Apple redesign and
+the planning features, not yet committed).
 
 **Observed:**
 
 ```
-npm test            97 tests, 97 pass, 0 fail
+npm test            362 tests, 362 pass, 0 fail
 npm run typecheck   clean
-npx next build      succeeds (7 routes)
-npx next start      boots; an uninitialised install redirects to /setup,
-                    a locked one to /unlock
+npx next build      succeeds
+npm run smoke:ui    every screen renders in both looks (pure mac-* on desktop, pure ios-* on a
+                    phone), light and dark, with no console errors; 16/16 write-path flows pass
+                    (scripts/ui-smoke/flows.mjs); the look is right at 1280, 800, 1024 touch,
+                    402 and 874-sideways, and a live resize across 744 px keeps the page
 ```
 
 All of these were run on the PC (x86-64 Linux), **not on the phone**. Nothing here has been
@@ -38,10 +41,10 @@ longer applies, the *requirement* is restated rather than dropped.
 |---|---|---|
 | [M0 — Foundation and device capability spike](#m0--foundation-and-device-capability-spike) | 🟡 | ⬜ Not met |
 | [M1 — Accurate offline manual finance](#m1--accurate-offline-manual-finance) | 🟡 | ⬜ Not met |
-| [M2 — SMS history and live ingestion](#m2--sms-history-and-live-ingestion) | 🟡 | 🟡 Live capture to review works; history import has no UI |
+| [M2 — SMS history and live ingestion](#m2--sms-history-and-live-ingestion) | 🟡 | 🟡 Live capture to review works; history import has a UI, untried with a real export |
 | [M3 — Gmail and cross-source matching](#m3--gmail-and-cross-source-matching) | ⬜ | ⬜ Not met |
 | [M4 — Reconciliation and bills](#m4--reconciliation-and-bills) | 🟡 | ⬜ Not met |
-| [M5 — Forecast and savings](#m5--forecast-and-savings) | ⬜ | ⬜ Not met |
+| [M5 — Forecast and savings](#m5--forecast-and-savings) | 🟡 | 🟡 Projection, scenarios, budgets and goals work; §22's two forecast fixtures are not written as tests |
 | [M6 — Agent with independent model selection](#m6--agent-with-independent-model-selection) | 🟡 | 🟡 Boundary tested with a scripted adversary; see ADR 0009 |
 | [M7 — Hardening and personal release](#m7--hardening-and-personal-release) | ⬜ | ⬜ Not met |
 
@@ -66,10 +69,24 @@ longer applies, the *requirement* is restated rather than dropped.
 - **live updates**: every open screen follows the ledger within about a second, on every device
   ([ADR 0010](adr/0010-live-updates-over-sse.md)).
 
-**What does not exist:** Gmail, bills and recurrence, reconciliation, forecast and savings, SMS
-*history* import from the UI (the XML parser exists and is tested; nothing calls it), restore from a
-backup, and TLS — the transport is plain HTTP on the LAN by the owner's choice
-([ADR 0008](adr/0008-bind-the-ledger-to-the-lan.md)), which remains the top security item.
+Added on 2026-10-22 (verified on the PC against a synthetic vault, **not yet on the phone**):
+
+- the interface redesigned with the apple-ui-ux kit: macOS on desktops and tablets, iOS on phones
+  ([ADR 0011](adr/0011-adaptive-apple-interface.md));
+- **Plan**: a day-by-day cash projection to the end of next month (expected and cautious lines,
+  buffer, lowest point, what could be set aside), monthly **budgets** per category with suggested
+  limits, and **savings goals** following an account or a hand-kept figure;
+- **Bills**: owner-approved recurring bills and income with paid / upcoming / overdue state read
+  from the ledger, detection of monthly payees and payers as suggestions, and card payments;
+- **Categories**: create, rename, re-icon, archive; spending and income categories kept apart;
+- Home's **Needs attention** list, read from the ledger; **CSV export**; **message-history import**
+  from an SMS Backup & Restore file in Settings; the Assistant answers bills, budgets, the outlook
+  and goals by rules, and the model has matching read tools.
+
+**What does not exist:** Gmail, reconciliation *explanations* (the unexplained-difference posting
+exists), reminders, restore from a backup, and TLS — the transport is plain HTTP on the LAN by the
+owner's choice ([ADR 0008](adr/0008-bind-the-ledger-to-the-lan.md)), which remains the top security
+item.
 
 ---
 
@@ -82,7 +99,7 @@ backup, and TLS — the transport is plain HTTP on the LAN by the owner's choice
 | ☐ | Encrypted storage proof | 🟡 | Proven **on the PC**: `src/core/data/database.test.ts` asserts the file is encrypted on disk, that a wrong passphrase reports *locked* rather than *corrupt*, that the same passphrase reopens it, and that a value beyond 2^53 survives the round trip. **Not proven on the S20** — the on-device native build has not been run. `scripts/setup-termux.sh` carries an equivalent smoke test for that. |
 | ☐ | Migrations | 🟡 | `src/core/data/migrations.ts`: 18 tables from §17.1, applied idempotently, with an edited migration refused rather than silently diverging. §17.3 invariants are enforced in SQL and tested. Untested on device. |
 | ☐ | Fictional fixtures | 🟡 | Synthetic ledger fixtures in `src/core/domain/test-support.ts` and the §22 scenarios in `posting.test.ts` / `finance-service.test.ts`. **No labeled message corpus** for §22's "Extraction evaluation" exists. |
-| ☐ | Visual tokens | ✅ | `src/app/globals.css` carries the §13 token table in light and dark, with tabular money digits, 48dp targets, opt-in glass with a solid fallback and a reduce-transparency override. Rendered in a browser on the PC only. |
+| ☐ | Visual tokens | ✅ | Superseded by the vendored apple-ui-ux kit ([ADR 0011](adr/0011-adaptive-apple-interface.md)): its tokens, light and dark, reduce-transparency and reduce-motion handling; 44 pt touch targets on iOS. Chart colours are the dataviz skill's validated steps. Rendered in a browser on the PC only. |
 | ☐ | Prove Room/encryption/migrations on a device | ➖ | No Room ([ADR 0001](adr/0001-nextjs-node-on-termux-instead-of-kotlin-compose.md)). Replacement requirement — prove `better-sqlite3-multiple-ciphers` plus the SQL migrations **on the S20** — is the outstanding half of the two rows above. |
 | ☐ | Verify non-default SMS read/receive capability | ✅ | **Verified on the S20 over adb.** `com.termux.api` held `READ_SMS` with `RESTRICTION_INSTALLER_EXEMPT` (sideloaded via `com.google.android.packageinstaller`); granted with `pm grant` **and** `appops set … allow`; `termux-sms-list` then returns messages. Without the appops step it returns `[]` silently. Default SMS role holder is `com.samsung.android.messaging`. See [ADR 0004](adr/0004-sms-via-termux-api-polling.md) and [termux-setup.md](termux-setup.md). |
 | ☐ | Working file-import fallback if SMS is blocked | ⬜ | §5.2 requires the SMS Backup & Restore XML path regardless of permission state. `fast-xml-parser` is a dependency; no importer written. |
@@ -168,7 +185,7 @@ unchanged.
 | ☐ | OS-level SMS read capability | ✅ | See M0. |
 | ☐ | Extraction schema and endpoint policy | ✅ | Wired into `src/ingestion/processing.ts`; measured in [extraction-eval.md](extraction-eval.md). |
 | ☐ | History import with sender/date filters and a preview count | ⬜ | The capture app holds only `RECEIVE_SMS`, so it cannot read history. |
-| ☐ | Selected-file import (SMS Backup & Restore XML) | 🟡 | `src/ingestion/sms/xml-import.ts` parses, previews and imports, with tests. No screen calls it. |
+| ☐ | Selected-file import (SMS Backup & Restore XML) | 🟡 | Settings → Import message history: choose a file, preview its senders (with how many messages look like money), tick senders, import. `POST /api/import/sms-xml`, session-gated, capped at 64 MB. A message already captured live (same sender and text within ±5 min) is not staged twice (tested). The preview step is exercised in the browser; the import step by unit tests only. Not tried with a real export. |
 | ☐ | Consent and filter preview | 🟡 | Senders are discovered disabled; no body is stored until the owner enables one. |
 | ☐ | Durable capture with staging before parsing | ✅ | `source_messages`, staged before any parsing; webhook answers 503 while locked so the collector retries. |
 | ☐ | Multipart support | ➖ | The collector delivers reassembled text. |
@@ -213,8 +230,8 @@ before M3 starts.**
 | ☐ | Current-balance entry and unknown adjustments | 🟡 | `balance_observations`, `reconciliation_checkpoints`, `unknown_adjustments` and `adjustment_explanations` tables exist; posting an unknown adjustment works and is tested (§22 fixture 8). No observation entry flow, no candidate search, no explanation writes. |
 | ☐ | Candidate search, partial/full explanations | ⬜ | |
 | ☐ | Stale-checkpoint handling after backdated changes | ⬜ | |
-| ☐ | Recurrence detection and owner-approved plans | ⬜ | No `recurring_plans` table yet. |
-| ☐ | Bill instances, payment allocations, paid/overdue state | ⬜ | No `bill_instances` table yet. |
+| ☐ | Recurrence detection and owner-approved plans | 🟡 | `recurring_items` (migration 8) holds only what the owner added; `recurring-service.detect()` suggests merchants and payers seen in two or more of the last six months, about once a month, for amounts within 30% (tested). Monthly cadence only. |
+| ☐ | Bill instances, payment allocations, paid/overdue state | 🟡 | Paid / upcoming / overdue is read from the ledger by matching a payment's merchant (or category and amount ±15%) in the current month. No per-instance rows and no partial-payment allocation, so §22's "6,200 paid as 3,000 + 3,200" fixture is not met. |
 | ☐ | Reminders | ⬜ | |
 
 **Gate — the worked examples in §10–§11 pass exactly, including backdated evidence, partial payment
@@ -226,12 +243,12 @@ and undo:** ⬜ not met.
 
 | ☐ | Item | Status |
 |---|---|---|
-| ☐ | Daily projections and next-month view | ⬜ |
-| ☐ | Covered-history estimates, credit-card cash timing | ⬜ |
-| ☐ | Base and conservative scenarios | ⬜ |
-| ☐ | Goals and virtual reservations | ⬜ |
-| ☐ | Explainable savings amount, low-balance dates, stale-data indicators | ⬜ |
-| ☐ | Accessible chart **and** table | ⬜ |
+| ☐ | Daily projections and next-month view | ✅ — `forecast-service.project()` day by day to the end of next month (tested); the Plan screen |
+| ☐ | Covered-history estimates, credit-card cash timing | 🟡 — the daily figure uses up to 90 days of history with recognised bills taken out, and says how many days it rests on; a card reaches cash on its due day for what is on it today. Bills charged to a card are left to the card payment |
+| ☐ | Base and conservative scenarios | ✅ — expected and cautious (25% more spending a day) |
+| ☐ | Goals and virtual reservations | ✅ — `savings_goals`: an account's balance or a hand-kept figure that moves no money |
+| ☐ | Explainable savings amount, low-balance dates, stale-data indicators | 🟡 — "could set aside" is read from the cautious line and explained on screen; lowest point and below-buffer date shown; confidence from history days. No stale-source indicator |
+| ☐ | Accessible chart **and** table | ✅ — every chart has a legend or label, keyboard and hover tooltips, and a hidden data table; the events behind the projection are a visible table |
 
 **Gate:** ⬜ not met.
 

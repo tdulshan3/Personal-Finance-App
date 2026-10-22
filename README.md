@@ -10,10 +10,12 @@ Built from [`buildspec.md`](buildspec.md). **The buildspec specifies a native Ko
 app; the owner overrode that.** The real stack is below, and every deviation has an
 [ADR](docs/adr/).
 
-> **Status: early.** The finance engine core, the encrypted data layer and the finance application
-> service are done and tested — on the PC. The UI and server session layer are in flight. Ingestion,
-> Gmail, bills, forecast and the agent are unwritten, and **nothing has yet run on the phone**. See
-> [docs/milestones.md](docs/milestones.md) for an honest, per-item checklist.
+> **Status:** the ledger, SMS capture from the owner's other phone, Review, the Assistant, Bills,
+> Plan (forecast, budgets, goals), backup and message-history import all work, in an interface that
+> follows Apple's design kits: macOS on desktops, iOS on phones
+> ([ADR 0011](docs/adr/0011-adaptive-apple-interface.md)). Gmail, reconciliation explanations,
+> restore from backup and TLS do not exist yet. See [docs/milestones.md](docs/milestones.md) for an
+> honest, per-item checklist.
 
 ---
 
@@ -23,6 +25,7 @@ app; the owner overrode that.** The real stack is below, and every deviation has
 |---|---|
 | **Runtime** | Node ≥ 22.6, TypeScript 5.9 |
 | **Framework** | Next.js 16 (App Router) + React 19 |
+| **Interface** | The apple-ui-ux kit's React components, vendored in `src/ui/macos/` and `src/ui/ios/`: macOS 27 on desktops and tablets, iOS 27 on phones, switching at 744 px |
 | **Database** | SQLite via `better-sqlite3-multiple-ciphers` — SQLCipher-compatible, whole-database encryption |
 | **Host** | Termux on a Samsung Galaxy S20 (SM-G981U1 / `x1q`, Android 13 / SDK 33, arm64-v8a) |
 | **Build** | On the PC, `output: 'standalone'`. The phone never compiles application code. |
@@ -101,6 +104,7 @@ see [ADR 0001](docs/adr/0001-nextjs-node-on-termux-instead-of-kotlin-compose.md)
 | [`scripts/setup-termux.sh`](scripts/setup-termux.sh) | Phone | Installs packages, creates directories, builds the native SQLite module on-device, smoke-tests encryption, checks `termux-sms-list` |
 | [`scripts/deploy-to-termux.sh`](scripts/deploy-to-termux.sh) | PC | Builds and ships the standalone output over adb or ssh. Never touches `data/`. |
 | [`scripts/start-server.sh`](scripts/start-server.sh) | Phone | Wake lock, bind policy, logging, `node server.js` |
+| [`scripts/ui-smoke/`](scripts/ui-smoke/run.sh) (`npm run smoke:ui`) | PC | Builds, seeds a throwaway vault with synthetic data, and drives headless Chrome: screenshots in either look, every write path (`PFA_FLOWS=scripts/ui-smoke/flows.mjs`), the look per screen size (`responsive.mjs`) |
 
 ---
 
@@ -141,13 +145,17 @@ see [ADR 0001](docs/adr/0001-nextjs-node-on-termux-instead-of-kotlin-compose.md)
 src/core/domain/       Money, time, double-entry ledger, posting rules   done
 src/core/data/         SQLite driver, schema, migrations, repositories   done
 src/core/security/     Passphrase → scrypt key derivation, lock state    done
-src/core/services/     Finance application service (§16 contracts)       done
-src/extraction/        Bounded schema, endpoint policy, llama.cpp client partial
-src/server/            Session and vault wiring                          in flight
-src/ui/  src/app/      Next.js App Router routes and components          in flight
-src/ingestion/sms/     termux-sms-list polling, XML file import          not started
+src/core/services/     Finance service; dashboard, budgets, recurring    done
+                       bills, goals, cash forecast, categories, cards
+src/extraction/        Rules, bounded schema, endpoint policy, clients   done
+src/server/            Session, vault, background processing, live SSE   done
+src/ingestion/sms/     Signed webhook, Termux poller, XML history import done
 src/ingestion/gmail/   OAuth, filtering, incremental sync                not started
-src/agent/             Agent client, tool registry, proposals            not started
+src/agent/             Rules-first answers, tools, proposals             done
+src/ui/                The app frame, page skeletons, charts, the        done
+                       vendored apple-ui-ux kit (macos/, ios/)
+src/app/               Routes: a server page reads the ledger, a client  done
+                       view draws it in the macOS or the iOS look
 ```
 
 Per-item status, with what has and has not been observed working:
@@ -244,6 +252,11 @@ buildspec said, what we do instead, and what we give up:
 | [0004](docs/adr/0004-sms-via-termux-api-polling.md) | SMS capture by polling `termux-sms-list`, not Android broadcasts |
 | [0005](docs/adr/0005-llama-cpp-openai-endpoint-instead-of-ollama.md) | llama.cpp's OpenAI-compatible endpoint instead of Ollama's native API |
 | [0006](docs/adr/0006-money-as-bigint-minor-units.md) | Money as `bigint` minor units, decimal strings on the wire |
+| [0007](docs/adr/0007-http-session-auth-for-the-phone-server.md) | Unlocking is authentication: one passphrase, an in-memory session token |
+| [0008](docs/adr/0008-bind-the-ledger-to-the-lan.md) | Bound to the LAN by owner choice, until TLS lands |
+| [0009](docs/adr/0009-assistant-rules-first-and-proposal-boundary.md) | Assistant answers by rules first; only the owner's Confirm executes a proposal |
+| [0010](docs/adr/0010-live-updates-over-sse.md) | Live updates over one SSE stream carrying only a version number |
+| [0011](docs/adr/0011-adaptive-apple-interface.md) | One app, two Apple looks: macOS on desktops, iOS on phones |
 
 [docs/adr/README.md](docs/adr/README.md) also lists the conflicts between the buildspec and this
 stack that do **not** have an ADR yet.

@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run test",
     "probe:extraction": "node scripts/probe-extraction-endpoint.ts",
-    "deploy:s20": "bash scripts/deploy-to-termux.sh"
+    "deploy:s20": "bash scripts/deploy-to-termux.sh",
+    "smoke:ui": "bash scripts/ui-smoke/run.sh"
   },
   "dependencies": {
     "fast-xml-parser": "^5.11.1",
