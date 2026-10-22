@@ -5,6 +5,7 @@ import { formatMoney } from "../core/domain/money.ts";
 import { addDays, localDateOf } from "../core/domain/time.ts";
 import type { FinanceService } from "../core/services/finance-service.ts";
 import { guessCategoryFor } from "./intents.ts";
+import { createPlanningReader } from "./planning.ts";
 import type { ModelIdentity, ProposalService } from "./proposals.ts";
 import { ActionType } from "./proposals.ts";
 
@@ -70,6 +71,10 @@ const READ_TOOLS: readonly ToolDefinition[] = [
     parameters: obj({ from: DATE, to: DATE }, ["from", "to"]),
   },
   { name: "get_review_items", description: "How many bank messages are waiting for the owner's review, with a short summary of each.", parameters: obj({}) },
+  { name: "get_upcoming_bills", description: "Saved bills, expected income and card payments with their due dates and whether this month's is paid, upcoming or overdue.", parameters: obj({}) },
+  { name: "get_budgets", description: "This month's budget per category: limit, spent, remaining, percent used, projected month end, status.", parameters: obj({}) },
+  { name: "get_cash_forecast", description: "The Plan screen's projection of spendable cash to the end of next month: spendable now, month-end (base and cautious), lowest point, buffer, how much could be set aside. Use it for 'how much can I save', 'will I run out'.", parameters: obj({}) },
+  { name: "get_savings_goals", description: "Savings goals with saved, target, percent, target date and the monthly amount still needed.", parameters: obj({}) },
 ];
 
 const PROPOSE_TRANSACTION: ToolDefinition = {
@@ -133,6 +138,7 @@ export function createToolExecutor(deps: {
   const { db, service, proposals, permissions } = deps;
   const allowed = new Set(toolDefinitions(permissions).map((t) => t.name));
   const today = () => localDateOf(service.clock.now(), service.zone);
+  const planning = createPlanningReader({ db, service });
 
   const optDate = (args: Record<string, unknown>, key: string): string | undefined => {
     const value = args[key];
@@ -201,6 +207,15 @@ export function createToolExecutor(deps: {
           },
         };
       }
+
+      case "get_upcoming_bills":
+        return { result: { bills: planning.bills() } };
+      case "get_budgets":
+        return { result: { budgets: planning.budgets() } };
+      case "get_cash_forecast":
+        return { result: { forecasts: planning.forecast(), note: "Planning estimate, not a promise. Quote these figures; do not recompute them." } };
+      case "get_savings_goals":
+        return { result: { goals: planning.goals() } };
 
       case "get_review_items": {
         const count = asNumber((db.prepare("SELECT COUNT(*) AS n FROM source_events WHERE status = 'needs_review'").get() as Record<string, unknown>).n, "n");

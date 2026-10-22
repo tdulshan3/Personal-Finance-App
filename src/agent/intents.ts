@@ -6,6 +6,7 @@ import { formatMoney, money } from "../core/domain/money.ts";
 import type { Money } from "../core/domain/money.ts";
 import { addDays, localDateOf } from "../core/domain/time.ts";
 import type { FinanceService } from "../core/services/finance-service.ts";
+import { createPlanningReader } from "./planning.ts";
 import type { ModelIdentity, ProposalService } from "./proposals.ts";
 import { ActionType } from "./proposals.ts";
 import type { AgentPermissions } from "./tools.ts";
@@ -185,6 +186,54 @@ export function createIntentRouter(deps: {
     };
   }
 
+  const planning = createPlanningReader({ db, service });
+
+  function bills(): IntentReply {
+    const rows = planning.bills();
+    if (rows.length === 0) return { text: "No bills are saved yet. Add rent, subscriptions or your salary on the Bills screen, and set your cards' due days there.", proposalIds: [] };
+    const open = rows.filter((r) => r.state !== "paid");
+    if (open.length === 0) return { text: "Nothing is due: every saved bill is paid for this month.", proposalIds: [] };
+    return {
+      text: [
+        ...open.map((r) => `${r.due ?? "no due day"} · ${r.name} · ${r.direction === "income" ? "+" : ""}${r.amount}${r.state === "overdue" ? " (overdue)" : ""}`),
+        "",
+        "A bill counts as paid once a payment to it is recorded this month.",
+      ].join("\n"),
+      proposalIds: [],
+    };
+  }
+
+  function budgets(): IntentReply {
+    const rows = planning.budgets();
+    if (rows.length === 0) return { text: "No budgets are set. You can add monthly limits per category on the Plan screen.", proposalIds: [] };
+    const word = (status: string) => (status === "over" ? " — over budget" : status === "near" ? " — close to the limit" : "");
+    return { text: rows.map((r) => `${r.category}: ${r.spent} of ${r.limit} (${r.percent_used}%)${word(r.status)}`).join("\n"), proposalIds: [] };
+  }
+
+  function outlook(): IntentReply {
+    const plans = planning.forecast();
+    if (plans.length === 0) return { text: "There are no accounts to plan from yet. Add one on the Accounts screen.", proposalIds: [] };
+    const lines = plans.flatMap((p) => [
+      `You have **${p.spendable_now}** to spend now. At your usual pace (about ${p.average_day_of_spending} a day), that is about ${p.month_end.base} at the end of the month (${p.month_end.cautious} if spending runs a quarter higher).`,
+      `The lowest point is ${p.lowest_point.amount} on ${p.lowest_point.date}. You could set aside **${p.could_set_aside}** and still stay above your buffer of ${p.buffer}.`,
+      ...(p.cautious_below_buffer_on ? [`In the cautious case, cash dips under the buffer on ${p.cautious_below_buffer_on}.`] : []),
+      ...(p.confidence === "low" ? [`There are only ${p.history_days} days of history, so treat this as a rough guess.`] : []),
+      ...p.notes,
+    ]);
+    return { text: [...lines, "", "This is a planning estimate from your recorded balances, saved bills and card due days — not a promise."].join("\n"), proposalIds: [] };
+  }
+
+  function goals(): IntentReply {
+    const rows = planning.goals();
+    if (rows.length === 0) return { text: "No savings goals yet. Add one on the Plan screen.", proposalIds: [] };
+    return {
+      text: rows
+        .map((g) => `${g.name}: ${g.saved} of ${g.target} (${g.percent}%)${g.reached ? " — reached" : g.per_month_needed ? ` — ${g.per_month_needed} a month to reach it by ${g.target_date}` : ""}`)
+        .join("\n"),
+      proposalIds: [],
+    };
+  }
+
   function tryAnswer(raw: string): IntentReply | null {
     const text = clean(raw);
     if (text.length === 0 || text.length > 160) return null;
@@ -207,6 +256,20 @@ export function createIntentRouter(deps: {
       const n = asNumber((db.prepare("SELECT COUNT(*) AS n FROM source_events WHERE status = 'needs_review'").get() as Record<string, unknown>).n, "n");
       return { text: n === 0 ? "Nothing is waiting for review." : `${n} message${n === 1 ? " is" : "s are"} waiting on the Review screen.`, proposalIds: [] };
     }
+
+    if (/^(?:what|which) (?:bills|payments) (?:are )?(?:due|coming up|left)(?: soon| this month| next)?$/i.test(text)
+      || /^(?:show (?:me )?)?(?:my )?(?:upcoming )?bills$/i.test(text)
+      || /^what(?:'s| is) (?:due|coming up)(?: soon| this month)?$/i.test(text)) return bills();
+
+    if (/^how (?:am i|are we) doing (?:on|with) (?:my )?budgets?$/i.test(text)
+      || /^(?:am i )?over (?:my )?budgets?$/i.test(text)
+      || /^(?:show (?:me )?)?(?:my )?budgets?$/i.test(text)) return budgets();
+
+    if (/^how much (?:can|could|should) i (?:save|set aside|put aside|put away)(?: this month)?$/i.test(text)
+      || /^(?:will|am) i (?:going to )?run (?:out|low)(?: of (?:money|cash))?(?: this month)?$/i.test(text)
+      || /^(?:show (?:me )?|what(?:'s| is) )?(?:my )?(?:cash ?flow )?(?:forecast|outlook|plan)$/i.test(text)) return outlook();
+
+    if (/^(?:how are )?(?:my )?(?:savings )?goals?(?: doing| progress)?$/i.test(text)) return goals();
 
     const expense = text.match(SPENT);
     if (expense) return draft("expense", expense);
