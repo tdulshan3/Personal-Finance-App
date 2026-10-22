@@ -193,6 +193,55 @@ describe("importing", () => {
     db.close();
   });
 
+  /*
+   * The real shape of that case: the webhook keeps its rows under its own connection, with a
+   * provider id rather than this file's fingerprint, and the forwarding phone stamps arrival a
+   * minute or so away from the backup app.
+   */
+  test("a message the webhook captured live is recognised by its text, across connections", async () => {
+    const db = await freshDb();
+    const importId = ensureImportConnection(db, Date.now());
+    db.prepare(
+      `INSERT INTO source_connections (id, kind, label, device_id, enabled, created_at, updated_at)
+       VALUES ('conn_live', 'sms_termux', 'Collector', 'webhook', 1, 0, 0)`,
+    ).run();
+    const live = (id: string, at: number, body: string) =>
+      db.prepare(
+        `INSERT INTO source_messages
+           (id, connection_id, provider_generation, external_id, source_kind, sender, received_at,
+            body, body_hmac, metadata_json, processing_status, created_at)
+         VALUES (?, 'conn_live', 'webhook', ?, 'sms_webhook', 'BlueLagoonBank', ?, ?, ?, '{}', 'reviewed', 0)`,
+      ).run(id, id, at, body, id);
+    // 90 seconds later than the backup says, and with the line ending a forwarder might add.
+    live("src_live_a", 1758200000000 + 90_000, "Purchase of LKR 3,450.00 at KEELLS SUPER on 18/09/2026.\r\n");
+
+    const result = importBackup(db, {
+      text: FILE, connectionId: importId, fingerprintSecret: SECRET, now: Date.now(),
+      allowedSenders: new Set(["BlueLagoonBank"]),
+    });
+    assert.equal(result.duplicates, 1, "the live copy is recognised");
+    assert.equal(result.staged, 1, "only the salary message is new");
+
+    // Two identical payments two minutes apart, one of them captured live: the other is still new.
+    const twins = `<smses>
+      ${sms({ address: "BlueLagoonBank", body: "Purchase of LKR 500.00 at SHOP.", date: "1758300000000", type: "1" })}
+      ${sms({ address: "BlueLagoonBank", body: "Purchase of LKR 500.00 at SHOP.", date: "1758300120000", type: "1" })}
+    </smses>`;
+    live("src_live_b", 1758300000500, "Purchase of LKR 500.00 at SHOP.");
+    const second = importBackup(db, {
+      text: twins, connectionId: importId, fingerprintSecret: SECRET, now: Date.now(),
+      allowedSenders: new Set(["BlueLagoonBank"]),
+    });
+    assert.equal(second.duplicates, 1, "one live row stands for one message");
+    assert.equal(second.staged, 1);
+
+    // Ten minutes away is a different message, not a late copy.
+    const later = `<smses>${sms({ address: "BlueLagoonBank", body: "Purchase of LKR 75.00 at KIOSK.", date: "1758400000000", type: "1" })}</smses>`;
+    live("src_live_c", 1758400000000 - 10 * 60_000, "Purchase of LKR 75.00 at KIOSK.");
+    assert.equal(importBackup(db, { text: later, connectionId: importId, fingerprintSecret: SECRET, now: Date.now(), allowedSenders: new Set(["BlueLagoonBank"]) }).staged, 1);
+    db.close();
+  });
+
   // §8: "two real payments can produce identical text" — same text, different second, both kept.
   test("identical text at different times is kept twice", async () => {
     const db = await freshDb();

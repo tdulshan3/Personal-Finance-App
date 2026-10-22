@@ -274,8 +274,11 @@ export type StageOutcome = {
  */
 const MONEY_EVENTS: ReadonlySet<string> = new Set(["posted_expense", "posted_income", "refund", "transfer", "fee", "bill", "pending_payment"]);
 
-/** True when the deterministic rules read the text as money moving, with an amount. */
-function looksFinancial(text: string): boolean {
+/**
+ * True when the deterministic rules read the text as money moving, with an amount. Exported for the
+ * history import, which uses the same test to say which senders in a file look like a bank.
+ */
+export function looksFinancial(text: string): boolean {
   try {
     const result = applyTemplates(text);
     return result.eventType !== null && MONEY_EVENTS.has(result.eventType) && result.amountText.value !== null;

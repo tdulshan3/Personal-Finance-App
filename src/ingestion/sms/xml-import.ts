@@ -247,6 +247,14 @@ function occurrenceKey(secret: string, sender: string, body: string, receivedAt:
     .slice(0, 32);
 }
 
+/** How far apart two sources may stamp the same message's arrival and still be one message. */
+export const CROSS_SOURCE_WINDOW_MS = 5 * 60 * 1000;
+
+/** Text compared across sources: Unicode-normalised, line endings and runs of spaces folded. */
+function sameText(body: string): string {
+  return body.normalize("NFKC").replace(/\s+/g, " ").trim();
+}
+
 /**
  * Stages the messages whose sender the owner has enabled.
  *
@@ -279,6 +287,17 @@ export function importBackup(
         AND received_at BETWEEN ? AND ?
       LIMIT 1`,
   );
+  /*
+   * The same message captured by another source — the live webhook above all. Its row stores the
+   * body as received and a provider id rather than this file's fingerprint, so the match is on the
+   * text itself, within five minutes either side: the phone that forwarded it live and the backup
+   * app stamp arrival a little differently.
+   */
+  const findElsewhere = db.prepare(
+    `SELECT id, body, received_at FROM source_messages
+      WHERE connection_id <> ? AND sender = ? AND body IS NOT NULL
+        AND received_at BETWEEN ? AND ?`,
+  );
   const insert = db.prepare(
     `INSERT INTO source_messages
        (id, connection_id, provider_generation, external_id, source_kind, sender, received_at,
@@ -289,6 +308,12 @@ export function importBackup(
   let staged = 0;
   let duplicates = 0;
   let filtered = 0;
+  /*
+   * Each live row stands for one message. §8's twin payments — identical text minutes apart — are
+   * two messages, so a live row that already accounted for one backup message cannot also account
+   * for the next.
+   */
+  const claimed = new Set<string>();
 
   db.transaction(() => {
     for (const message of messages) {
@@ -306,6 +331,17 @@ export function importBackup(
         message.receivedAt + 999,
       );
       if (found) {
+        duplicates += 1;
+        continue;
+      }
+      const text = sameText(message.body);
+      const live = (
+        findElsewhere.all(input.connectionId, message.sender, message.receivedAt - CROSS_SOURCE_WINDOW_MS, message.receivedAt + CROSS_SOURCE_WINDOW_MS) as Record<string, unknown>[]
+      )
+        .filter((row) => !claimed.has(asText(row.id, "id")) && sameText(asText(row.body, "body")) === text)
+        .sort((a, b) => Math.abs(Number(a.received_at) - message.receivedAt) - Math.abs(Number(b.received_at) - message.receivedAt))[0];
+      if (live) {
+        claimed.add(asText(live.id, "id"));
         duplicates += 1;
         continue;
       }
