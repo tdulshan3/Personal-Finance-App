@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.agent
+data
+logs
+*.db
+*.db-shm
+*.db-wal

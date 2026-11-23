@@ -1,0 +1,21 @@
+services:
+  finance-ledger:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: finance-ledger:latest
+    container_name: finance-ledger
+    user: "0:0"
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/data
+    environment:
+      PFA_DATA_DIR: /data
+      PFA_REQUIRE_HTTPS: "false"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
