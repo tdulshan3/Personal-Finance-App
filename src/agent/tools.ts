@@ -1,16 +1,18 @@
 import { accountNamesFor } from "../app/transactions/ledger-rows.ts";
 import type { Db } from "../core/data/driver.ts";
-import { asNumber } from "../core/data/driver.ts";
 import { FinanceError, validationError } from "../core/domain/errors.ts";
 import type { Money } from "../core/domain/money.ts";
 import { formatMoney, money, requireCurrency } from "../core/domain/money.ts";
+import { TransactionStatus } from "../core/domain/transaction.ts";
 import { localDateOf } from "../core/domain/time.ts";
+import { createBalanceCheckService } from "../core/services/balance-check.ts";
 import { createDashboardService } from "../core/services/dashboard-service.ts";
 import type { FinanceService } from "../core/services/finance-service.ts";
 import { guessCategoryFor } from "./intents.ts";
 import { createPlanningReader } from "./planning.ts";
 import type { ModelIdentity, ProposalService } from "./proposals.ts";
 import { ActionType } from "./proposals.ts";
+import { createExpenseReporter, formatCurrencyMap } from "./reporting.ts";
 
 /**
  * The assistant's tools.
@@ -57,24 +59,31 @@ const AMOUNT = {
 
 const READ_TOOLS: readonly ToolDefinition[] = [
   { name: "list_accounts", description: "All of the owner's visible accounts with id, type, currency and current balance, plus available_to_spend and total_owed_on_cards. Call this before anything that needs an account_id.", parameters: obj({}) },
-  { name: "list_categories", description: "All categories with their ids.", parameters: obj({}) },
+  { name: "list_categories", description: "All categories with their id, name and kind (expense or income).", parameters: obj({}) },
   {
     name: "search_transactions",
-    description: "Find recorded transactions and exact totals matching filters. All filters are optional. Use sort='largest' for biggest expenses/transactions, or text to check if a bill or merchant was paid.",
+    description: "Find recorded transactions and exact totals matching filters. All filters are optional. Use sort='largest' for biggest expenses/transactions, text to check if a bill or merchant was paid, include_history_only=true for pre-tracking historical imports, or status='deleted' for Trash.",
     parameters: obj({
       from: DATE,
       to: DATE,
       account_id: { type: "string", description: "Account id or exact account name" },
       category_id: { type: "string", description: "Category id or exact category name" },
       kind: { type: "string", enum: ["expense", "income", "refund", "transfer"], description: "Filter by transaction type." },
+      status: { type: "string", enum: ["posted", "deleted"], description: "Use 'deleted' to inspect Trash (default 'posted')." },
+      include_history_only: { type: "boolean", description: "Set true to include imported pre-tracking history_only records." },
       text: { type: "string", description: "Matches merchant name or notes" },
       sort: { type: "string", enum: ["newest", "largest"], description: "Use 'largest' for biggest expenses/transactions, 'newest' (default) for recent." },
       limit: { type: "integer", minimum: 1, maximum: 25 },
     }),
   },
   {
+    name: "get_transaction_detail",
+    description: "Full detail of ONE transaction by transaction_id (accounts, direction, category, notes, status).",
+    parameters: obj({ transaction_id: { type: "string" } }, ["transaction_id"]),
+  },
+  {
     name: "get_spending_summary",
-    description: "Net spending per category and top merchants between two local dates (inclusive), computed by the ledger. Defaults to this month if dates are omitted. Transfers and card payments are not spending and are excluded.",
+    description: "Complete expense report for a date range (inclusive): total, transaction_count, by_category, by_account, top_merchants, largest_expenses, previous_period comparison, plus any history_only imports or pending_review messages. Defaults to this month if dates are omitted.",
     parameters: obj({
       from: { type: "string", description: "Start date YYYY-MM-DD (defaults to first day of this month)" },
       to: { type: "string", description: "End date YYYY-MM-DD (defaults to today)" },
@@ -88,11 +97,23 @@ const READ_TOOLS: readonly ToolDefinition[] = [
       to: { type: "string", description: "End date YYYY-MM-DD (defaults to today)" },
     }),
   },
-  { name: "get_review_items", description: "How many bank messages are waiting for the owner's review, with a short summary of each.", parameters: obj({}) },
+  {
+    name: "get_monthly_trend",
+    description: "Month-by-month income, spending and net cashflow over the last N months (default 6). Use for multi-month trends or comparing several months.",
+    parameters: obj({
+      months: { type: "integer", minimum: 2, maximum: 12 },
+    }),
+  },
+  {
+    name: "get_review_items",
+    description: "Bank messages waiting for the owner's review, with formatted amounts, dates and merchant text. Optional from/to date filter.",
+    parameters: obj({ from: DATE, to: DATE }),
+  },
   { name: "get_upcoming_bills", description: "Saved recurring bills, expected income and credit card due dates for this month. Only covers saved recurring items; to check whether a specific bill (like electricity or water) was paid, also call search_transactions.", parameters: obj({}) },
   { name: "get_budgets", description: "This month's budget per category: limit, spent, remaining, percent used, projected month end, status.", parameters: obj({}) },
   { name: "get_cash_forecast", description: "The Plan screen's projection of spendable cash to the end of next month: spendable now, month-end (base and cautious), lowest point, buffer, how much could be set aside. Use it for 'how much can I save', 'will I run out'.", parameters: obj({}) },
   { name: "get_savings_goals", description: "Savings goals with saved, target, percent, target date and the monthly amount still needed.", parameters: obj({}) },
+  { name: "get_balance_checks", description: "Ledger integrity status and latest bank-reported balance vs ledger balance comparison per account.", parameters: obj({}) },
 ];
 
 const PROPOSE_TRANSACTION: ToolDefinition = {
@@ -118,6 +139,73 @@ const PROPOSE_TRANSFER: ToolDefinition = {
   }, ["from_account_id", "to_account_id", "amount", "date"]),
 };
 
+const PROPOSE_EDIT_TRANSACTION: ToolDefinition = {
+  name: "propose_edit_transaction",
+  description: "Draft editing an existing expense or income by transaction_id (from search_transactions). Only pass fields that change. Owner must press Confirm.",
+  parameters: obj({
+    transaction_id: { type: "string" },
+    account_id: { type: "string" },
+    amount: AMOUNT,
+    date: DATE,
+    category_id: { type: "string" },
+    merchant: { type: "string" },
+    notes: { type: "string" },
+  }, ["transaction_id"]),
+};
+
+const PROPOSE_RESTORE_TRANSACTION: ToolDefinition = {
+  name: "propose_restore_transaction",
+  description: "Draft restoring ONE deleted transaction from Trash (find its transaction_id with search_transactions status='deleted') for the owner to confirm.",
+  parameters: obj({ transaction_id: { type: "string" } }, ["transaction_id"]),
+};
+
+const PROPOSE_SET_BUDGET: ToolDefinition = {
+  name: "propose_set_budget",
+  description: "Draft setting or removing a monthly budget limit for an expense category, for the owner to confirm.",
+  parameters: obj({
+    category_id: { type: "string", description: "Expense category id or name" },
+    amount: AMOUNT,
+    currency: { type: "string" },
+    remove: { type: "boolean", description: "Set true to remove this category's budget." },
+  }, ["category_id"]),
+};
+
+const PROPOSE_CREATE_BILL: ToolDefinition = {
+  name: "propose_create_bill",
+  description: "Draft adding a recurring monthly bill or expected income to the Bills screen, for the owner to confirm.",
+  parameters: obj({
+    name: { type: "string" },
+    direction: { type: "string", enum: ["bill", "income"] },
+    amount: AMOUNT,
+    due_day: { type: "integer", minimum: 1, maximum: 31 },
+    account_id: { type: "string" },
+    category_id: { type: "string" },
+    currency: { type: "string" },
+  }, ["name", "direction", "amount", "due_day"]),
+};
+
+const PROPOSE_CREATE_GOAL: ToolDefinition = {
+  name: "propose_create_goal",
+  description: "Draft creating a savings goal on the Plan screen, for the owner to confirm.",
+  parameters: obj({
+    name: { type: "string" },
+    target_amount: AMOUNT,
+    target_date: DATE,
+    account_id: { type: "string" },
+    saved_amount: AMOUNT,
+    currency: { type: "string" },
+  }, ["name", "target_amount"]),
+};
+
+const PROPOSE_CREATE_CATEGORY: ToolDefinition = {
+  name: "propose_create_category",
+  description: "Draft creating a new expense or income category, for the owner to confirm.",
+  parameters: obj({
+    name: { type: "string" },
+    kind: { type: "string", enum: ["expense", "income"] },
+  }, ["name", "kind"]),
+};
+
 const PROPOSE_DELETE: ToolDefinition = {
   name: "propose_delete_transaction",
   description: "Draft moving ONE transaction to Trash, by exact id from search_transactions, for the owner to confirm.",
@@ -127,7 +215,16 @@ const PROPOSE_DELETE: ToolDefinition = {
 export function toolDefinitions(permissions: AgentPermissions): ToolDefinition[] {
   const tools = [...READ_TOOLS];
   if (permissions.mode === "assist") {
-    tools.push(PROPOSE_TRANSACTION, PROPOSE_TRANSFER);
+    tools.push(
+      PROPOSE_TRANSACTION,
+      PROPOSE_TRANSFER,
+      PROPOSE_EDIT_TRANSACTION,
+      PROPOSE_RESTORE_TRANSACTION,
+      PROPOSE_SET_BUDGET,
+      PROPOSE_CREATE_BILL,
+      PROPOSE_CREATE_GOAL,
+      PROPOSE_CREATE_CATEGORY,
+    );
     if (permissions.allowDelete) tools.push(PROPOSE_DELETE);
   }
   return tools;
@@ -194,8 +291,29 @@ export function createToolExecutor(deps: {
   };
   const coerceAmount = (raw: unknown): unknown =>
     typeof raw === "number" && Number.isFinite(raw) ? String(raw) : raw;
-  const formatTotalsMap = (map: Map<string, Money>, empty = "0"): string =>
-    map.size === 0 ? empty : [...map.values()].map((m) => formatMoney(m)).join(" + ");
+  const optBool = (args: Record<string, unknown>, key: string): boolean | undefined => {
+    const value = args[key];
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      const lower = value.trim().toLowerCase();
+      if (lower === "true") return true;
+      if (lower === "false") return false;
+    }
+    return undefined;
+  };
+  const reporter = createExpenseReporter({ db, service });
+
+  const PROPOSE_ACTION_MAP: Readonly<Record<string, ActionType>> = {
+    propose_transaction: ActionType.CREATE_TRANSACTION,
+    propose_transfer: ActionType.CREATE_TRANSFER,
+    propose_delete_transaction: ActionType.DELETE_TRANSACTION,
+    propose_edit_transaction: ActionType.EDIT_TRANSACTION,
+    propose_restore_transaction: ActionType.RESTORE_TRANSACTION,
+    propose_set_budget: ActionType.SET_BUDGET,
+    propose_create_bill: ActionType.CREATE_BILL,
+    propose_create_goal: ActionType.CREATE_GOAL,
+    propose_create_category: ActionType.CREATE_CATEGORY,
+  };
 
   function run(name: string, args: Record<string, unknown>): ToolOutcome {
     switch (name) {
@@ -226,14 +344,14 @@ export function createToolExecutor(deps: {
         return {
           result: {
             accounts,
-            available_to_spend: formatTotalsMap(totals.liquid),
-            total_owed_on_cards: formatTotalsMap(owed),
+            available_to_spend: formatCurrencyMap(totals.liquid),
+            total_owed_on_cards: formatCurrencyMap(owed),
           },
         };
       }
 
       case "list_categories":
-        return { result: service.listCategories().map((c) => ({ category_id: c.id, name: c.name })) };
+        return { result: service.listCategories().map((c) => ({ category_id: c.id, name: c.name, kind: c.kind })) };
 
       case "search_transactions": {
         const limit = optInt(args, "limit", 15, 1, 25);
@@ -252,6 +370,12 @@ export function createToolExecutor(deps: {
         if (kind !== undefined && !["expense", "income", "refund", "transfer"].includes(kind)) {
           throw validationError("'kind' must be expense, income, refund or transfer");
         }
+        const rawStatus = optText(args, "status");
+        if (rawStatus !== undefined && rawStatus !== "posted" && rawStatus !== "deleted") {
+          throw validationError("'status' must be 'posted' or 'deleted'");
+        }
+        const status = rawStatus === "deleted" ? TransactionStatus.DELETED : TransactionStatus.POSTED;
+        const includeHistoryOnly = optBool(args, "include_history_only") ?? false;
         const rawSort = optText(args, "sort");
         if (rawSort !== undefined && rawSort !== "newest" && rawSort !== "largest") {
           throw validationError("'sort' must be 'newest' or 'largest'");
@@ -264,6 +388,8 @@ export function createToolExecutor(deps: {
           accountId,
           categoryId,
           kind,
+          status,
+          includeHistoryOnly,
           sort,
           text: optText(args, "text"),
         };
@@ -286,7 +412,13 @@ export function createToolExecutor(deps: {
         }
         const totalsByKind: Record<string, string> = {};
         for (const [rowKind, curMap] of byKindAndCurrency) {
-          totalsByKind[rowKind] = formatTotalsMap(curMap);
+          totalsByKind[rowKind] = formatCurrencyMap(curMap);
+        }
+
+        let historyExcluded = 0;
+        if (!includeHistoryOnly && status === TransactionStatus.POSTED) {
+          const withHistory = service.searchTransactions({ ...filters, includeHistoryOnly: true, limit: 200 });
+          historyExcluded = Math.max(0, withHistory.length - Math.min(allRows.length, 200));
         }
 
         return {
@@ -295,6 +427,12 @@ export function createToolExecutor(deps: {
             returned: shown.length,
             truncated: allRows.length > shown.length,
             totals_by_kind: totalsByKind,
+            ...(historyExcluded > 0
+              ? {
+                  history_only_excluded: historyExcluded,
+                  note: `${historyExcluded} imported historical transaction(s) matched; call with include_history_only: true to inspect them.`,
+                }
+              : {}),
             transactions: shown.map((t) => ({
               transaction_id: t.id,
               kind: t.kind,
@@ -303,8 +441,32 @@ export function createToolExecutor(deps: {
               account: accountNames.get(t.id) ?? null,
               merchant: clip(t.merchantName),
               category: t.categoryId ? (names.get(t.categoryId) ?? t.categoryId) : null,
+              ...(t.accountingScope !== "ledger" ? { accounting_scope: t.accountingScope } : {}),
               ...(t.notes ? { notes: clip(t.notes) } : {}),
             })),
+          },
+        };
+      }
+
+      case "get_transaction_detail": {
+        const id = optText(args, "transaction_id");
+        if (!id) throw validationError("'transaction_id' is required");
+        const detail = service.getTransactionDetail(id);
+        const rev = detail.currentRevision;
+        const names = new Map(service.listCategories(true).map((c) => [c.id, c.name]));
+        return {
+          result: {
+            transaction_id: detail.transaction.id,
+            kind: detail.transaction.kind,
+            status: detail.transaction.status,
+            accounting_scope: detail.transaction.accountingScope,
+            date: localDateOf(rev.occurredAt.instant, rev.occurredAt.zone),
+            amount: formatMoney(rev.displayAmount),
+            accounts: detail.accounts.map((a) => ({ account_id: a.id, name: a.name, direction: a.direction })),
+            category: rev.categoryId ? (names.get(rev.categoryId) ?? rev.categoryId) : null,
+            merchant: clip(rev.merchantName),
+            notes: clip(rev.notes, 200),
+            revision_count: detail.revisionCount,
           },
         };
       }
@@ -313,34 +475,7 @@ export function createToolExecutor(deps: {
         const from = optDate(args, "from") ?? monthStart(today());
         const to = optDate(args, "to") ?? today();
         if (from > to) throw validationError("'from' must not be after 'to'");
-        const names = new Map(service.listCategories(true).map((c) => [c.id, c.name]));
-        const rows = service.spendingByCategory(from, to);
-        const totals = new Map<string, Money>();
-        const currencies = new Map<string, Money["currency"]>();
-        for (const row of rows) {
-          const code = row.amount.currency.code;
-          currencies.set(code, row.amount.currency);
-          const prev = totals.get(code);
-          totals.set(code, money(row.amount.currency, (prev?.minor ?? 0n) + row.amount.minor));
-        }
-        const dashboard = createDashboardService({ db });
-        const topMerchants = [...currencies.values()].flatMap((currency) =>
-          dashboard.topMerchants(currency, from, to, 8).map((m) => ({
-            merchant: m.merchant,
-            amount: formatMoney(m.amount),
-            count: m.times,
-          })),
-        );
-        return {
-          result: {
-            from,
-            to,
-            by_category: rows.map((r) => ({ category: names.get(r.categoryId) ?? r.categoryId, amount: formatMoney(r.amount) })),
-            top_merchants: topMerchants,
-            // Summed here, by the engine, so the model never has to add money itself (§1.1).
-            total: formatTotalsMap(totals),
-          },
-        };
+        return { result: reporter.expenseReport(from, to) };
       }
 
       case "get_cashflow_summary": {
@@ -372,12 +507,43 @@ export function createToolExecutor(deps: {
               .map((m) => ({ merchant: m.merchant, amount: formatMoney(m.amount), count: m.times })),
           };
         });
+        const historyOnly = reporter.historyOnlyExpenses(from, to);
+        const pendingReview = reporter.pendingReviewItems(from, to);
         return {
           result: {
             from,
             to,
             by_currency: byCurrency,
+            ...(historyOnly.count > 0 ? { history_only: historyOnly } : {}),
+            ...(pendingReview.count > 0 ? { pending_review: pendingReview } : {}),
             note: "Transfers and card payments are excluded from income and spending.",
+          },
+        };
+      }
+
+      case "get_monthly_trend": {
+        const months = optInt(args, "months", 6, 2, 12);
+        const dashboard = createDashboardService({ db });
+        const currencyCodes = new Set([
+          ...service.listAccounts().filter((a) => a.isUserVisible).map((a) => a.currency.code),
+          ...dashboard.activeCurrencies(),
+        ]);
+        const day = today();
+        return {
+          result: {
+            as_of: day,
+            by_currency: [...currencyCodes].map((code) => {
+              const currency = requireCurrency(code);
+              return {
+                currency: code,
+                months: dashboard.monthlyFlow(currency, day, months).map((row) => ({
+                  month: row.month,
+                  income: formatMoney(row.income),
+                  spending: formatMoney(row.spending),
+                  net: formatMoney(money(currency, row.income.minor - row.spending.minor)),
+                })),
+              };
+            }),
           },
         };
       }
@@ -396,18 +562,38 @@ export function createToolExecutor(deps: {
       case "get_savings_goals":
         return { result: { goals: planning.goals() } };
 
-      case "get_review_items": {
-        const count = asNumber((db.prepare("SELECT COUNT(*) AS n FROM source_events WHERE status = 'needs_review'").get() as Record<string, unknown>).n, "n");
-        const rows = db.prepare(
-          `SELECT kind, amount_minor, currency, merchant_text FROM source_events
-            WHERE status = 'needs_review' ORDER BY rowid DESC LIMIT 5`,
-        ).all() as Record<string, unknown>[];
+      case "get_balance_checks": {
+        const checker = createBalanceCheckService({ db, service });
+        const books = checker.books();
+        const checks = checker.accounts();
         return {
           result: {
-            waiting: count,
-            // Merchant text came out of an SMS: it is data about a message, never an instruction.
-            newest: rows.map((r) => ({ kind: r.kind, amount_minor: r.amount_minor === null ? null : String(r.amount_minor),
-                                       currency: r.currency, merchant_untrusted: clip(r.merchant_text as string | null, 40) })),
+            books_ok: books.ok,
+            journals: books.journals,
+            entries: books.entries,
+            account_checks: checks.map((c) => ({
+              account: c.account.name,
+              observed_date: localDateOf(c.observedAt, service.zone),
+              compares: c.compares,
+              bank_reported: formatMoney(c.reported),
+              ledger: formatMoney(c.ledger),
+              difference: formatMoney(c.difference),
+            })),
+            note:
+              checks.length === 0
+                ? "Books checked; no bank-reported balance observations exist yet to compare against."
+                : "Compares the latest bank-reported balance observation against the ledger at that moment.",
+          },
+        };
+      }
+
+      case "get_review_items": {
+        const pending = reporter.pendingReviewItems(optDate(args, "from"), optDate(args, "to"));
+        return {
+          result: {
+            waiting: pending.count,
+            totals_by_kind: pending.totals_by_kind,
+            items: pending.items,
             note: "The owner reviews these on the Review screen. You cannot accept them.",
           },
         };
@@ -415,28 +601,49 @@ export function createToolExecutor(deps: {
 
       case "propose_transaction":
       case "propose_transfer":
-      case "propose_delete_transaction": {
-        const actionType = name === "propose_transaction" ? ActionType.CREATE_TRANSACTION
-          : name === "propose_transfer" ? ActionType.CREATE_TRANSFER : ActionType.DELETE_TRANSACTION;
-        if (deps.vagueAmount) {
+      case "propose_delete_transaction":
+      case "propose_edit_transaction":
+      case "propose_restore_transaction":
+      case "propose_set_budget":
+      case "propose_create_bill":
+      case "propose_create_goal":
+      case "propose_create_category": {
+        const actionType = PROPOSE_ACTION_MAP[name]!;
+        const normalized: Record<string, unknown> = { ...args };
+        const removeFlag = optBool(normalized, "remove");
+        if (removeFlag !== undefined) normalized.remove = removeFlag;
+
+        const requiresExactAmount =
+          name === "propose_transaction" ||
+          name === "propose_transfer" ||
+          (name === "propose_edit_transaction" && normalized.amount !== undefined) ||
+          (name === "propose_set_budget" && normalized.remove !== true) ||
+          name === "propose_create_bill" ||
+          name === "propose_create_goal";
+
+        if (deps.vagueAmount && requiresExactAmount) {
           // Enforced here, not just requested in the prompt: small models draft from "around 400".
           return { result: { error: "The owner gave an estimate, not an exact amount. Do not propose. Ask them for the exact amount." } };
         }
-        const normalized: Record<string, unknown> = { ...args };
-        if (name === "propose_transaction") {
-          normalized.amount = coerceAmount(normalized.amount);
-          if (typeof normalized.account_id === "string") normalized.account_id = resolveAccountId(normalized.account_id);
-          if (typeof normalized.category_id === "string") normalized.category_id = resolveCategoryId(normalized.category_id);
-          if (!normalized.category_id || normalized.category_id === "uncategorized") {
-            const kind = normalized.kind === "income" || normalized.kind === "refund" ? normalized.kind : "expense";
-            const hint = [normalized.merchant, normalized.notes].filter((v): v is string => typeof v === "string").join(" ");
-            if (hint) normalized.category_id = guessCategoryFor(db, hint, kind);
-          }
-        } else if (name === "propose_transfer") {
-          normalized.amount = coerceAmount(normalized.amount);
-          if (typeof normalized.from_account_id === "string") normalized.from_account_id = resolveAccountId(normalized.from_account_id);
-          if (typeof normalized.to_account_id === "string") normalized.to_account_id = resolveAccountId(normalized.to_account_id);
+
+        if (normalized.amount !== undefined) normalized.amount = coerceAmount(normalized.amount);
+        if (normalized.target_amount !== undefined) normalized.target_amount = coerceAmount(normalized.target_amount);
+        if (normalized.saved_amount !== undefined) normalized.saved_amount = coerceAmount(normalized.saved_amount);
+        if (typeof normalized.account_id === "string") normalized.account_id = resolveAccountId(normalized.account_id);
+        if (typeof normalized.from_account_id === "string") normalized.from_account_id = resolveAccountId(normalized.from_account_id);
+        if (typeof normalized.to_account_id === "string") normalized.to_account_id = resolveAccountId(normalized.to_account_id);
+        if (typeof normalized.category_id === "string") normalized.category_id = resolveCategoryId(normalized.category_id);
+
+        if (name === "propose_transaction" && (!normalized.category_id || normalized.category_id === "uncategorized")) {
+          const kind = normalized.kind === "income" || normalized.kind === "refund" ? normalized.kind : "expense";
+          const hint = [normalized.merchant, normalized.notes].filter((v): v is string => typeof v === "string").join(" ");
+          if (hint) normalized.category_id = guessCategoryFor(db, hint, kind);
+        } else if (name === "propose_create_bill" && !normalized.category_id && typeof normalized.name === "string") {
+          const kind = normalized.direction === "income" || normalized.direction === "in" ? "income" : "expense";
+          const guessed = guessCategoryFor(db, normalized.name, kind);
+          if (guessed !== "uncategorized") normalized.category_id = guessed;
         }
+
         const proposal = proposals.createProposal({ actionType, args: normalized, sessionId: deps.sessionId, model: deps.model });
         return {
           proposalId: proposal.id,

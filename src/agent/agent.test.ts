@@ -9,11 +9,19 @@ import { migrate } from "../core/data/migrations.ts";
 import { AccountType } from "../core/domain/ledger.ts";
 import { LKR, formatMoney, majorUnits } from "../core/domain/money.ts";
 import { dateOnlyTime, fixedClock, fromIso } from "../core/domain/time.ts";
+import { AccountingScope } from "../core/domain/transaction.ts";
 import { deriveKey, newKdfParams } from "../core/security/passphrase.ts";
+import { createBudgetService } from "../core/services/budget-service.ts";
+import { createCategoryService } from "../core/services/category-service.ts";
 import { createFinanceService } from "../core/services/finance-service.ts";
+import { createGoalService } from "../core/services/goal-service.ts";
+import { createRecurringService } from "../core/services/recurring-service.ts";
+import { createMessageProcessor } from "../ingestion/processing.ts";
+import { generateWebhookSecret, parseWebhookPayload, stageWebhookMessage } from "../ingestion/sms/webhook.ts";
 import { createAgent, writePermissions } from "./agent-loop.ts";
 import type { ChatClient, ChatCompletion, ChatTurn } from "./chat-client.ts";
 import { createChatClient } from "./chat-client.ts";
+import { createIntentRouter } from "./intents.ts";
 import { createProposalService } from "./proposals.ts";
 import type { ToolDefinition } from "./tools.ts";
 import { DEFAULT_PERMISSIONS, createToolExecutor } from "./tools.ts";
@@ -328,4 +336,174 @@ test("chat client parses MiniCPM XML function calls, ignores unknown ones, and s
   assert.equal(reply.toolCalls[0]!.name, "search_transactions");
   assert.deepEqual(reply.toolCalls[0]!.arguments, { kind: "expense", sort: "largest", notes: "A & B\nline2" });
   assert.equal(reply.content, '<function name="unknown_tool"><param name="x">1</param></function>');
+});
+
+test("last-month expense report includes account breakdown, previous comparison, history_only, and formatted pending_review", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pfa-report-")); dirs.push(dir);
+  const db = await openEncryptedDatabase({ file: join(dir, "l.db"), key: await deriveKey("a passphrase for report", { ...newKdfParams(), N: 1 << 10 }) });
+  migrate(db);
+  const clock = fixedClock(fromIso("2026-11-25T10:00:00+05:30"), ZONE);
+  const service = createFinanceService({ db, zone: ZONE, clock });
+  service.seedDefaultCategories();
+
+  const bank = service.createAccount({ name: "Commercial Bank", type: AccountType.BANK, currency: LKR });
+  const card = service.createAccount({ name: "HNB Card", type: AccountType.CREDIT_CARD, currency: LKR, creditLimit: majorUnits(LKR, 200_000n) });
+  service.setOpeningBalance({ accountId: bank.id, amount: majorUnits(LKR, 200_000n), occurredAt: dateOnlyTime("2026-09-01", ZONE) });
+
+  // September (two months ago) for previous_period comparison
+  service.createExpense({ accountId: bank.id, amount: majorUnits(LKR, 10_000n), occurredAt: dateOnlyTime("2026-09-15", ZONE), merchantName: "Keells", splits: [{ categoryId: "groceries", amount: majorUnits(LKR, 10_000n) }] });
+
+  // October (last month): ledger expenses + history_only + pending_review bank message
+  service.createExpense({ accountId: bank.id, amount: majorUnits(LKR, 15_000n), occurredAt: dateOnlyTime("2026-10-05", ZONE), merchantName: "Keells Super", splits: [{ categoryId: "groceries", amount: majorUnits(LKR, 15_000n) }] });
+  service.createExpense({ accountId: card.id, amount: majorUnits(LKR, 7_500n), occurredAt: dateOnlyTime("2026-10-12", ZONE), merchantName: "Pizza Hut", splits: [{ categoryId: "dining", amount: majorUnits(LKR, 7_500n) }] });
+  service.createExpense({ accountId: bank.id, amount: majorUnits(LKR, 3_000n), occurredAt: dateOnlyTime("2026-10-02", ZONE), merchantName: "Old Import", accountingScope: AccountingScope.HISTORY_ONLY, splits: [{ categoryId: "dining", amount: majorUnits(LKR, 3_000n) }] });
+
+  const config = generateWebhookSecret(db, clock.now());
+  const msg = { from: "SampleBank", text: "Purchase of LKR 2,100.00 at CARGILLS using card ****1234 on 18/10/2026.", sentStamp: fromIso("2026-10-18T12:00:00+05:30"), receivedStamp: fromIso("2026-10-18T12:00:05+05:30"), sim: "" };
+  stageWebhookMessage(db, config, parseWebhookPayload(msg), clock.now());
+  db.prepare("UPDATE source_senders SET enabled = 1").run();
+  await createMessageProcessor({ db, clock, zone: ZONE }).processPending({ useModel: false });
+
+  const proposals = createProposalService({ db, service });
+  const sessionId = createAgent({ db, service }).newSession();
+  const tools = createToolExecutor({ db, service, proposals, sessionId, model: MODEL, permissions: DEFAULT_PERMISSIONS });
+
+  const report = tools.execute("get_spending_summary", { from: "2026-10-01", to: "2026-10-31" }).result as {
+    transaction_count: number;
+    total: string;
+    by_category: { category: string; amount: string }[];
+    by_account: { account: string; amount: string; count: number }[];
+    largest_expenses: { merchant: string; amount: string; account: string }[];
+    previous_period: { from: string; to: string; total: string; change: string };
+    history_only: { count: number; total: string; by_category: { category: string; amount: string }[] };
+    pending_review: { count: number; items: { date: string; amount: string | null }[] };
+  };
+  assert.equal(report.transaction_count, 2);
+  assert.equal(report.total, "LKR 22,500.00");
+  assert.deepEqual(report.by_account, [
+    { account: "Commercial Bank", amount: "LKR 15,000.00", count: 1 },
+    { account: "HNB Card", amount: "LKR 7,500.00", count: 1 },
+  ]);
+  assert.equal(report.largest_expenses[0]!.merchant, "Keells Super");
+  assert.equal(report.previous_period.from, "2026-09-01");
+  assert.equal(report.previous_period.to, "2026-09-30");
+  assert.equal(report.previous_period.total, "LKR 10,000.00");
+  assert.match(report.previous_period.change, /\+LKR 12,500\.00/);
+  assert.equal(report.history_only.count, 1);
+  assert.equal(report.history_only.total, "LKR 3,000.00");
+  assert.equal(report.pending_review.count, 1);
+  assert.equal(report.pending_review.items[0]!.date, "2026-10-18");
+  assert.equal(report.pending_review.items[0]!.amount, "LKR 2,100.00");
+
+  // get_review_items formats amounts cleanly instead of exposing raw minor units
+  const review = tools.execute("get_review_items", { from: "2026-10-01", to: "2026-10-31" }).result as {
+    waiting: number;
+    totals_by_kind: Record<string, string>;
+    items: { amount: string; date: string }[];
+  };
+  assert.equal(review.waiting, 1);
+  assert.equal(review.items[0]!.amount, "LKR 2,100.00");
+  assert.equal(review.totals_by_kind.posted_expense, "LKR 2,100.00");
+
+  // search_transactions flags excluded history_only rows and includes them when asked
+  const searchNoHist = tools.execute("search_transactions", { from: "2026-10-01", to: "2026-10-31" }).result as { total_matches: number; history_only_excluded: number };
+  assert.equal(searchNoHist.total_matches, 2);
+  assert.equal(searchNoHist.history_only_excluded, 1);
+  const searchWithHist = tools.execute("search_transactions", { from: "2026-10-01", to: "2026-10-31", include_history_only: true }).result as { total_matches: number };
+  assert.equal(searchWithHist.total_matches, 3);
+
+  // Rules-first intent router also reports history_only and pending_review for last month
+  const router = createIntentRouter({ db, service, proposals, sessionId, permissions: DEFAULT_PERMISSIONS });
+  const ruleReply = router.tryAnswer("how much did I spend last month?")!;
+  assert.match(ruleReply.text, /LKR 22,500\.00/);
+  assert.match(ruleReply.text, /LKR 3,000\.00/);
+  assert.match(ruleReply.text, /1 bank message/);
+
+  // New read tools: get_monthly_trend, get_balance_checks
+  const trend = tools.execute("get_monthly_trend", { months: 3 }).result as { by_currency: { months: { month: string; spending: string }[] }[] };
+  assert.equal(trend.by_currency[0]!.months.length, 3);
+  const oct = trend.by_currency[0]!.months.find((m) => m.month === "2026-10")!;
+  assert.equal(oct.spending, "LKR 22,500.00");
+
+  const checks = tools.execute("get_balance_checks", {}).result as { books_ok: boolean };
+  assert.equal(checks.books_ok, true);
+});
+
+test("in-app agent tools can propose and confirm edits, Trash restores, budgets, bills, goals, and categories", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pfa-skills-")); dirs.push(dir);
+  const db = await openEncryptedDatabase({ file: join(dir, "l.db"), key: await deriveKey("a passphrase for skills", { ...newKdfParams(), N: 1 << 10 }) });
+  migrate(db);
+  const clock = fixedClock(fromIso("2026-11-25T10:00:00+05:30"), ZONE);
+  const service = createFinanceService({ db, zone: ZONE, clock });
+  service.seedDefaultCategories();
+
+  const bank = service.createAccount({ name: "Commercial Bank", type: AccountType.BANK, currency: LKR });
+  const savings = service.createAccount({ name: "Emergency Savings", type: AccountType.SAVINGS, currency: LKR });
+  service.setOpeningBalance({ accountId: bank.id, amount: majorUnits(LKR, 100_000n), occurredAt: dateOnlyTime("2026-11-01", ZONE) });
+  service.setOpeningBalance({ accountId: savings.id, amount: majorUnits(LKR, 25_000n), occurredAt: dateOnlyTime("2026-11-01", ZONE) });
+  const created = service.createExpense({ accountId: bank.id, amount: majorUnits(LKR, 1_000n), occurredAt: dateOnlyTime("2026-11-10", ZONE), merchantName: "Coffee Shop", splits: [{ categoryId: "dining", amount: majorUnits(LKR, 1_000n) }] });
+
+  const proposals = createProposalService({ db, service });
+  const sessionId = createAgent({ db, service }).newSession();
+  const tools = createToolExecutor({ db, service, proposals, sessionId, model: MODEL, permissions: { mode: "assist", allowDelete: true } });
+
+  const confirm = (proposalId: string | undefined) => {
+    assert.ok(proposalId);
+    const p = proposals.get(proposalId)!;
+    return proposals.approveAndExecute({ proposalId, shownHash: p.hash, currentModel: MODEL });
+  };
+
+  // get_transaction_detail
+  const detail = tools.execute("get_transaction_detail", { transaction_id: created.transactionId }).result as { amount: string; accounts: { name: string }[] };
+  assert.equal(detail.amount, "LKR 1,000.00");
+  assert.equal(detail.accounts[0]!.name, "Commercial Bank");
+
+  // propose_edit_transaction: changes nothing until Confirm, then updates amount and merchant
+  const editProp = tools.execute("propose_edit_transaction", { transaction_id: created.transactionId, amount: 1200, merchant: "Barista Cafe" });
+  assert.equal(formatMoney(service.balanceOf(bank.id)), "LKR 99,000.00", "nothing changes before Confirm");
+  confirm(editProp.proposalId);
+  assert.equal(formatMoney(service.balanceOf(bank.id)), "LKR 98,800.00");
+  assert.equal(service.getTransactionDetail(created.transactionId).currentRevision.merchantName, "Barista Cafe");
+
+  // Stale target revision rejects edit proposal if transaction changed before Confirm
+  const staleProp = tools.execute("propose_edit_transaction", { transaction_id: created.transactionId, amount: 1300 });
+  const staleRecord = proposals.get(staleProp.proposalId!)!;
+  const afterEdit = service.getTransactionDetail(created.transactionId);
+  service.editExpense({ transactionId: created.transactionId, expectedRevision: afterEdit.transaction.currentRevision, accountId: bank.id, amount: majorUnits(LKR, 1_400n), occurredAt: dateOnlyTime("2026-11-10", ZONE), merchantName: "Barista", splits: [{ categoryId: "dining", amount: majorUnits(LKR, 1_400n) }] });
+  assert.throws(() => proposals.approveAndExecute({ proposalId: staleRecord.id, shownHash: staleRecord.hash, currentModel: MODEL }), /changed/);
+
+  // Delete -> find in Trash -> propose_restore_transaction -> Confirm restores balance
+  confirm(tools.execute("propose_delete_transaction", { transaction_id: created.transactionId }).proposalId);
+  assert.equal(formatMoney(service.balanceOf(bank.id)), "LKR 100,000.00");
+  const trash = tools.execute("search_transactions", { status: "deleted" }).result as { total_matches: number; transactions: { transaction_id: string }[] };
+  assert.equal(trash.total_matches, 1);
+  assert.equal(trash.transactions[0]!.transaction_id, created.transactionId);
+  confirm(tools.execute("propose_restore_transaction", { transaction_id: created.transactionId }).proposalId);
+  assert.equal(formatMoney(service.balanceOf(bank.id)), "LKR 98,600.00");
+
+  // propose_set_budget (set + remove)
+  const budgetProp = tools.execute("propose_set_budget", { category_id: "Groceries", amount: 25000 });
+  assert.equal(createBudgetService({ db, service }).list(LKR, "2026-11-25").length, 0);
+  confirm(budgetProp.proposalId);
+  assert.equal(createBudgetService({ db, service }).list(LKR, "2026-11-25")[0]!.limit.minor, 2_500_000n);
+  confirm(tools.execute("propose_set_budget", { category_id: "Groceries", remove: true }).proposalId);
+  assert.equal(createBudgetService({ db, service }).list(LKR, "2026-11-25").length, 0);
+
+  // propose_create_bill
+  const billProp = tools.execute("propose_create_bill", { name: "Fiber Internet", direction: "bill", amount: 3500, due_day: 28, account_id: "Commercial Bank", category_id: "Utilities" });
+  assert.equal(createRecurringService({ db, service }).list("2026-11-25").length, 0);
+  confirm(billProp.proposalId);
+  assert.equal(createRecurringService({ db, service }).list("2026-11-25")[0]!.name, "Fiber Internet");
+
+  // propose_create_goal
+  const goalProp = tools.execute("propose_create_goal", { name: "Holiday Fund", target_amount: 100000, target_date: "2027-06-01", account_id: "Emergency Savings" });
+  assert.equal(createGoalService({ db, service }).list("2026-11-25").length, 0);
+  confirm(goalProp.proposalId);
+  assert.equal(createGoalService({ db, service }).list("2026-11-25")[0]!.name, "Holiday Fund");
+
+  // propose_create_category
+  const catProp = tools.execute("propose_create_category", { name: "Pets", kind: "expense" });
+  assert.equal(createCategoryService({ db, service }).list(false).some((c) => c.name === "Pets"), false);
+  confirm(catProp.proposalId);
+  assert.equal(createCategoryService({ db, service }).list(false).some((c) => c.name === "Pets"), true);
 });

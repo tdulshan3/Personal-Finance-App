@@ -9,6 +9,7 @@ import type { FinanceService } from "../core/services/finance-service.ts";
 import { createPlanningReader } from "./planning.ts";
 import type { ModelIdentity, ProposalService } from "./proposals.ts";
 import { ActionType } from "./proposals.ts";
+import { createExpenseReporter } from "./reporting.ts";
 import type { AgentPermissions } from "./tools.ts";
 
 /**
@@ -140,9 +141,28 @@ export function createIntentRouter(deps: {
     return { text: [...lines, "", ...footer].join("\n").trim(), proposalIds: [] };
   }
 
+  const reporter = createExpenseReporter({ db, service });
+
   function spending(from: string, to: string, label: string): IntentReply {
     const rows = service.spendingByCategory(from, to);
-    if (rows.length === 0) return { text: `No spending recorded ${label} (${from} to ${to}).`, proposalIds: [] };
+    const historyOnly = reporter.historyOnlyExpenses(from, to);
+    const pending = reporter.pendingReviewItems(from, to);
+    const extra: string[] = [];
+    if (historyOnly.count > 0) {
+      const top = historyOnly.by_category.slice(0, 5).map((c) => `${c.category}: ${c.amount}`).join(", ");
+      extra.push(`Imported pre-tracking history (${historyOnly.count}): ${historyOnly.total}${top ? ` (${top})` : ""}.`);
+    }
+    if (pending.count > 0) {
+      extra.push(`${pending.count} bank message${pending.count === 1 ? "" : "s"} in this period still waiting on Review.`);
+    }
+    if (rows.length === 0) {
+      return {
+        text: extra.length > 0
+          ? [`No ledger spending recorded ${label} (${from} to ${to}).`, "", ...extra].join("\n")
+          : `No spending recorded ${label} (${from} to ${to}).`,
+        proposalIds: [],
+      };
+    }
     const names = new Map(service.listCategories(true).map((c) => [c.id, c.name]));
     const totals = new Map<string, Money>();
     for (const row of rows) {
@@ -153,6 +173,7 @@ export function createIntentRouter(deps: {
     return {
       text: [`You spent **${total}** ${label} (${from} to ${to}).`, "",
              ...rows.slice(0, 10).map((r) => `${names.get(r.categoryId) ?? r.categoryId}: ${formatMoney(r.amount)}`),
+             ...extra,
              "", "Transfers and card payments aren't counted as spending."].join("\n"),
       proposalIds: [],
     };

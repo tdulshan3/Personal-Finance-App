@@ -167,7 +167,7 @@ export function createChatClient(endpoint: AgentEndpoint, options: { fetchImpl?:
         ...(wireTools.length > 0 ? { tools: wireTools } : {}),
         stream: false,
         ...(withThinkSwitch ? { think: false } : {}),
-        options: { temperature: 0.2, num_predict: 1024, num_ctx: 8192 },
+        options: { temperature: 0.2, num_predict: 1024, num_ctx: 16384 },
       };
     }
     return {

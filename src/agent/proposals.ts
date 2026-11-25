@@ -3,10 +3,16 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Db } from "../core/data/driver.ts";
 import { asNumber, asOptionalText, asText } from "../core/data/driver.ts";
 import { FinanceError, FinanceErrorCode, validationError } from "../core/domain/errors.ts";
-import { formatMoney, parseMajorUnits } from "../core/domain/money.ts";
+import { AccountKind } from "../core/domain/ledger.ts";
+import type { Currency } from "../core/domain/money.ts";
+import { formatMoney, money, parseMajorUnits, requireCurrency } from "../core/domain/money.ts";
 import { ActorKind } from "../core/domain/posting.ts";
-import { dateOnlyTime, localDateOf } from "../core/domain/time.ts";
+import { dateOnlyTime, localDateOf, parseLocalDate } from "../core/domain/time.ts";
+import { createBudgetService } from "../core/services/budget-service.ts";
+import { createCategoryService } from "../core/services/category-service.ts";
 import type { FinanceService } from "../core/services/finance-service.ts";
+import { createGoalService } from "../core/services/goal-service.ts";
+import { createRecurringService } from "../core/services/recurring-service.ts";
 
 /**
  * Proposals: the only way the assistant can change anything.
@@ -30,6 +36,12 @@ export const ActionType = {
   CREATE_TRANSACTION: "transaction.create",
   CREATE_TRANSFER: "transaction.transfer",
   DELETE_TRANSACTION: "transaction.delete",
+  EDIT_TRANSACTION: "transaction.edit",
+  RESTORE_TRANSACTION: "transaction.restore",
+  SET_BUDGET: "budget.set",
+  CREATE_BILL: "bill.create",
+  CREATE_GOAL: "goal.create",
+  CREATE_CATEGORY: "category.create",
 } as const;
 export type ActionType = (typeof ActionType)[keyof typeof ActionType];
 
@@ -90,8 +102,14 @@ export function createProposalService(deps: { db: Db; service: FinanceService })
   function requireDate(args: Record<string, unknown>, key: string): string {
     const value = str(args, key, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw validationError(`'${key}' must be YYYY-MM-DD`);
+    parseLocalDate(value);
     if (value > today()) throw validationError("That date is in the future");
     return value;
+  }
+
+  function defaultCurrency(): Currency {
+    const visible = service.listAccounts().filter((a) => a.isUserVisible && a.archivedAt === undefined);
+    return visible[0]?.currency ?? requireCurrency("LKR");
   }
 
   /**
@@ -198,6 +216,262 @@ export function createProposalService(deps: { db: Db; service: FinanceService })
           },
         };
       }
+
+      case ActionType.EDIT_TRANSACTION: {
+        const id = str(raw, "transaction_id");
+        const detail = service.getTransactionDetail(id);
+        if (detail.transaction.status !== "posted") throw validationError("Only an active posted transaction can be edited");
+        if (detail.transaction.kind !== "expense" && detail.transaction.kind !== "income") {
+          throw validationError("Only expenses and income can be edited with this tool");
+        }
+        const rev = detail.currentRevision;
+        const nextAccountId = optStr(raw, "account_id") ?? detail.accounts[0]?.id;
+        if (!nextAccountId) throw validationError("account_id is required");
+        const account = service.findAccount(nextAccountId);
+        if (!account || account.archivedAt !== undefined || !account.isUserVisible) {
+          throw validationError("Unknown or archived account_id. Call list_accounts.");
+        }
+        if (detail.transaction.kind === "income" && account.kind !== AccountKind.ASSET) {
+          throw validationError("Income must be received into an asset account");
+        }
+        const amountInput = optStr(raw, "amount", 30);
+        const amount = amountInput ? parseMajorUnits(account.currency, amountInput) : rev.displayAmount;
+        if (amount.minor <= 0n) throw validationError("amount must be positive");
+        if (amount.currency.code !== account.currency.code) {
+          throw validationError(`Amount currency (${amount.currency.code}) must match ${account.name} (${account.currency.code})`);
+        }
+        const date = optStr(raw, "date", 10)
+          ? requireDate(raw, "date")
+          : localDateOf(rev.occurredAt.instant, rev.occurredAt.zone);
+        const categoryInput = optStr(raw, "category_id");
+        const multiSplitPreserved =
+          amountInput === undefined &&
+          categoryInput === undefined &&
+          rev.categoryId === undefined &&
+          (detail.journal?.entries.filter((e) => e.categoryId !== undefined).length ?? 0) > 1;
+        const categoryId = categoryInput ?? rev.categoryId ?? (detail.transaction.kind === "income" ? "income" : "uncategorized");
+        const category = service.listCategories(true).find((c) => c.id === categoryId);
+        if (!multiSplitPreserved) {
+          if (!category || (categoryInput !== undefined && category.archivedAt !== undefined)) {
+            throw validationError("Unknown category_id. Call list_categories.");
+          }
+          if (category.kind !== detail.transaction.kind) {
+            throw validationError(`Category '${category.name}' is for ${category.kind}, not ${detail.transaction.kind}`);
+          }
+        }
+        const merchant = raw.merchant === undefined ? rev.merchantName : optStr(raw, "merchant", 120);
+        const notes = raw.notes === undefined ? rev.notes : optStr(raw, "notes");
+        return {
+          args: {
+            transaction_id: id,
+            kind: detail.transaction.kind,
+            account_id: account.id,
+            amount: formatMoney(amount, { withCode: false, grouping: false }),
+            currency: account.currency.code,
+            date,
+            category_id: categoryId,
+            preserve_splits: multiSplitPreserved,
+            merchant,
+            notes,
+          },
+          targets: { [id]: detail.transaction.currentRevision, [account.id]: account.revision },
+          preview: {
+            title: detail.transaction.kind === "expense" ? "Edit expense" : "Edit income",
+            lines: [
+              { label: "Amount", value: formatMoney(amount) },
+              { label: "Account", value: account.name },
+              { label: "Date", value: date },
+              { label: "Category", value: multiSplitPreserved ? "Multiple categories (unchanged)" : (category?.name ?? categoryId) },
+              ...(merchant ? [{ label: detail.transaction.kind === "income" ? "From" : "Merchant", value: merchant }] : []),
+              ...(notes ? [{ label: "Notes", value: notes }] : []),
+            ],
+            effects: ["Replaces the active revision with an auditable reversal + replacement journal."],
+            risk: "low" as const,
+          },
+        };
+      }
+
+      case ActionType.RESTORE_TRANSACTION: {
+        const id = str(raw, "transaction_id");
+        const detail = service.getTransactionDetail(id);
+        if (detail.transaction.status !== "deleted") throw validationError("That transaction is not in Trash");
+        const rev = detail.currentRevision;
+        return {
+          args: { transaction_id: id },
+          targets: { [id]: detail.transaction.currentRevision },
+          preview: {
+            title: "Restore a transaction from Trash",
+            lines: [
+              { label: "Transaction", value: rev.merchantName ?? detail.transaction.kind },
+              { label: "Amount", value: formatMoney(rev.displayAmount) },
+              { label: "Date", value: localDateOf(rev.occurredAt.instant, rev.occurredAt.zone) },
+            ],
+            effects: ["Its effect on your balances is restored."],
+            risk: "low" as const,
+          },
+        };
+      }
+
+      case ActionType.SET_BUDGET: {
+        const categoryId = str(raw, "category_id");
+        const category = service.listCategories(false).find((c) => c.id === categoryId);
+        if (!category) throw validationError("Unknown or archived category_id. Call list_categories.");
+        if (category.kind !== "expense") throw validationError("Budgets are only for spending categories.");
+        const remove = raw.remove === true;
+        if (remove) {
+          return {
+            args: { category_id: category.id, remove: true },
+            targets: {},
+            preview: {
+              title: "Remove monthly budget",
+              lines: [{ label: "Category", value: category.name }],
+              effects: [`Removes the monthly budget limit for ${category.name} on the Plan screen.`],
+              risk: "low" as const,
+            },
+          };
+        }
+        const curCode = optStr(raw, "currency", 10);
+        const cur = curCode ? requireCurrency(curCode) : defaultCurrency();
+        const amount = parseMajorUnits(cur, str(raw, "amount", 30));
+        if (amount.minor <= 0n) throw validationError("Budget amount must be positive");
+        return {
+          args: {
+            category_id: category.id,
+            currency: cur.code,
+            amount: formatMoney(amount, { withCode: false, grouping: false }),
+            remove: false,
+          },
+          targets: {},
+          preview: {
+            title: "Set monthly budget",
+            lines: [
+              { label: "Category", value: category.name },
+              { label: "Monthly limit", value: formatMoney(amount) },
+            ],
+            effects: [`Sets the ${category.name} monthly limit to ${formatMoney(amount)} on the Plan screen.`],
+            risk: "low" as const,
+          },
+        };
+      }
+
+      case ActionType.CREATE_BILL: {
+        const name = str(raw, "name", 60);
+        const dirRaw = str(raw, "direction", 10).toLowerCase();
+        const direction = dirRaw === "income" || dirRaw === "in" ? "in" : dirRaw === "bill" || dirRaw === "out" ? "out" : null;
+        if (!direction) throw validationError("'direction' must be 'bill' or 'income'");
+        const dueDay = typeof raw.due_day === "number"
+          ? Math.trunc(raw.due_day)
+          : typeof raw.due_day === "string" && /^\d+$/.test(raw.due_day.trim())
+            ? Number(raw.due_day.trim())
+            : NaN;
+        if (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) {
+          throw validationError("'due_day' must be a day of the month from 1 to 31");
+        }
+        const accountId = optStr(raw, "account_id");
+        const account = accountId ? service.findAccount(accountId) : undefined;
+        if (accountId && (!account || !account.isUserVisible || account.archivedAt !== undefined)) {
+          throw validationError("Unknown or archived account_id. Call list_accounts.");
+        }
+        if (account && direction === "in" && account.kind !== AccountKind.ASSET) {
+          throw validationError("Expected income must arrive in a bank, cash, or wallet account");
+        }
+        const categoryId = optStr(raw, "category_id");
+        const category = categoryId ? service.listCategories(false).find((c) => c.id === categoryId) : undefined;
+        if (categoryId && !category) throw validationError("Unknown category_id. Call list_categories.");
+        const curCode = optStr(raw, "currency", 10);
+        const cur = account?.currency ?? (curCode ? requireCurrency(curCode) : defaultCurrency());
+        const amount = parseMajorUnits(cur, str(raw, "amount", 30));
+        if (amount.minor <= 0n) throw validationError("amount must be positive");
+        return {
+          args: {
+            name,
+            direction,
+            amount: formatMoney(amount, { withCode: false, grouping: false }),
+            currency: cur.code,
+            due_day: dueDay,
+            account_id: account?.id,
+            category_id: category?.id,
+          },
+          targets: account ? { [account.id]: account.revision } : {},
+          preview: {
+            title: direction === "in" ? "Add expected income" : "Add recurring bill",
+            lines: [
+              { label: "Name", value: name },
+              { label: "Amount", value: formatMoney(amount) },
+              { label: "Due day", value: `Day ${dueDay} each month` },
+              ...(account ? [{ label: "Account", value: account.name }] : []),
+              ...(category ? [{ label: "Category", value: category.name }] : []),
+            ],
+            effects: ["Adds this recurring item to the Bills screen and cash forecast."],
+            risk: "low" as const,
+          },
+        };
+      }
+
+      case ActionType.CREATE_GOAL: {
+        const name = str(raw, "name", 60);
+        const accountId = optStr(raw, "account_id");
+        const account = accountId ? service.findAccount(accountId) : undefined;
+        if (accountId && (!account || !account.isUserVisible || account.archivedAt !== undefined || account.kind !== AccountKind.ASSET)) {
+          throw validationError("Goal account must be an active bank, cash, wallet, or savings account");
+        }
+        const curCode = optStr(raw, "currency", 10);
+        const cur = account?.currency ?? (curCode ? requireCurrency(curCode) : defaultCurrency());
+        const target = parseMajorUnits(cur, str(raw, "target_amount", 30));
+        if (target.minor <= 0n) throw validationError("target_amount must be positive");
+        const targetDate = optStr(raw, "target_date", 10);
+        if (targetDate) parseLocalDate(targetDate);
+        const savedInput = optStr(raw, "saved_amount", 30);
+        if (savedInput && account) {
+          throw validationError("A goal linked to an account tracks that account's balance automatically; omit saved_amount.");
+        }
+        const saved = savedInput ? parseMajorUnits(cur, savedInput) : undefined;
+        if (saved && saved.minor < 0n) throw validationError("saved_amount cannot be negative");
+        return {
+          args: {
+            name,
+            target_amount: formatMoney(target, { withCode: false, grouping: false }),
+            currency: cur.code,
+            target_date: targetDate,
+            account_id: account?.id,
+            saved_amount: saved ? formatMoney(saved, { withCode: false, grouping: false }) : undefined,
+          },
+          targets: account ? { [account.id]: account.revision } : {},
+          preview: {
+            title: "Create savings goal",
+            lines: [
+              { label: "Goal", value: name },
+              { label: "Target", value: formatMoney(target) },
+              ...(targetDate ? [{ label: "Target date", value: targetDate }] : []),
+              ...(account ? [{ label: "Linked account", value: account.name }] : []),
+              ...(saved ? [{ label: "Starting saved", value: formatMoney(saved) }] : []),
+            ],
+            effects: ["Adds this savings goal to the Plan screen."],
+            risk: "low" as const,
+          },
+        };
+      }
+
+      case ActionType.CREATE_CATEGORY: {
+        const name = str(raw, "name", 40).replace(/\s+/g, " ");
+        const kind = str(raw, "kind", 10);
+        if (kind !== "expense" && kind !== "income") throw validationError("kind must be expense or income");
+        const clash = service.listCategories(false).find((c) => c.name.toLowerCase() === name.toLowerCase());
+        if (clash) throw validationError(`There is already a category called '${clash.name}'`);
+        return {
+          args: { name, kind },
+          targets: {},
+          preview: {
+            title: "Create category",
+            lines: [
+              { label: "Name", value: name },
+              { label: "Kind", value: kind === "income" ? "Income" : "Spending" },
+            ],
+            effects: ["Adds this category to the Categories screen."],
+            risk: "low" as const,
+          },
+        };
+      }
     }
   }
 
@@ -293,7 +567,12 @@ export function createProposalService(deps: { db: Db; service: FinanceService })
       finish(input.proposalId, "stale", error instanceof Error ? error.message : "No longer valid.");
       throw new FinanceError(FinanceErrorCode.STALE_PROPOSAL, `This can no longer be done: ${error instanceof Error ? error.message : "state changed"}`);
     }
-    if (actionType === ActionType.DELETE_TRANSACTION && canonical(rebuilt.targets) !== canonical(targets)) {
+    if (
+      (actionType === ActionType.DELETE_TRANSACTION ||
+        actionType === ActionType.EDIT_TRANSACTION ||
+        actionType === ActionType.RESTORE_TRANSACTION) &&
+      canonical(rebuilt.targets) !== canonical(targets)
+    ) {
       finish(input.proposalId, "stale", "The transaction was edited after this was proposed.");
       throw new FinanceError(FinanceErrorCode.STALE_PROPOSAL, "That transaction changed since this was proposed. Ask again for a fresh preview.");
     }
@@ -328,10 +607,82 @@ export function createProposalService(deps: { db: Db; service: FinanceService })
           service.createTransfer({ fromAccountId: from.id, toAccountId: String(args.to_account_id), amount,
                                    occurredAt: dateOnlyTime(String(args.date), service.zone), notes: args.notes as string | undefined }, write);
           summary = `Transferred ${formatMoney(amount)}.`;
-        } else {
+        } else if (actionType === ActionType.DELETE_TRANSACTION) {
           const id = String(args.transaction_id);
           service.deleteTransaction({ transactionId: id, expectedRevision: targets[id] ?? 0 }, write);
           summary = "Moved to Trash. You can restore it from Activity.";
+        } else if (actionType === ActionType.EDIT_TRANSACTION) {
+          const id = String(args.transaction_id);
+          const account = service.findAccount(String(args.account_id))!;
+          const amount = parseMajorUnits(account.currency, String(args.amount));
+          const occurredAt = dateOnlyTime(String(args.date), service.zone);
+          const detail = service.getTransactionDetail(id);
+          const splits = args.preserve_splits && detail.journal
+            ? detail.journal.entries
+                .filter((e) => e.categoryId !== undefined)
+                .map((e) => ({
+                  categoryId: e.categoryId!,
+                  amount: money(account.currency, e.amountMinorSigned < 0n ? -e.amountMinorSigned : e.amountMinorSigned),
+                }))
+            : [{ categoryId: String(args.category_id), amount }];
+          const editInput = {
+            transactionId: id,
+            expectedRevision: targets[id] ?? 0,
+            accountId: account.id,
+            amount,
+            occurredAt,
+            splits,
+            merchantName: args.merchant as string | undefined,
+            notes: args.notes as string | undefined,
+          };
+          if (args.kind === "income") service.editIncome(editInput, write);
+          else service.editExpense(editInput, write);
+          summary = `Updated transaction to ${formatMoney(amount)} on ${account.name}.`;
+        } else if (actionType === ActionType.RESTORE_TRANSACTION) {
+          const id = String(args.transaction_id);
+          service.restoreTransaction({ transactionId: id, expectedRevision: targets[id] ?? 0 }, write);
+          summary = "Restored from Trash.";
+        } else if (actionType === ActionType.SET_BUDGET) {
+          const budgets = createBudgetService({ db, service });
+          const categoryId = String(args.category_id);
+          if (args.remove) {
+            budgets.set(categoryId, null);
+            summary = "Removed monthly budget.";
+          } else {
+            const amount = parseMajorUnits(requireCurrency(String(args.currency)), String(args.amount));
+            budgets.set(categoryId, amount);
+            summary = `Set monthly budget to ${formatMoney(amount)}.`;
+          }
+        } else if (actionType === ActionType.CREATE_BILL) {
+          const cur = requireCurrency(String(args.currency));
+          const amount = parseMajorUnits(cur, String(args.amount));
+          const created = createRecurringService({ db, service }).create({
+            name: String(args.name),
+            direction: args.direction === "in" ? "in" : "out",
+            amount,
+            dueDay: Number(args.due_day),
+            accountId: (args.account_id as string | undefined) ?? null,
+            categoryId: (args.category_id as string | undefined) ?? null,
+          });
+          summary = `Added recurring item "${created.name}" (${formatMoney(amount)}).`;
+        } else if (actionType === ActionType.CREATE_GOAL) {
+          const cur = requireCurrency(String(args.currency));
+          const target = parseMajorUnits(cur, String(args.target_amount));
+          const saved = args.saved_amount ? parseMajorUnits(cur, String(args.saved_amount)) : undefined;
+          createGoalService({ db, service }).create({
+            name: String(args.name),
+            target,
+            targetDate: (args.target_date as string | undefined) ?? null,
+            accountId: (args.account_id as string | undefined) ?? null,
+            saved,
+          });
+          summary = `Created savings goal "${String(args.name)}" (${formatMoney(target)}).`;
+        } else {
+          const created = createCategoryService({ db, service }).create({
+            name: String(args.name),
+            kind: args.kind === "income" ? "income" : "expense",
+          });
+          summary = `Created category "${created.name}".`;
         }
         finish(input.proposalId, "executed", summary);
         return summary;

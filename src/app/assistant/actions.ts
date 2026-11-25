@@ -57,7 +57,7 @@ export async function confirmProposalAction(_prev: ChatState, formData: FormData
     });
     const sessionId = String(formData.get("sessionId") ?? "");
     if (sessionId && result.resultText) a.note(sessionId, `Confirmed by you. ${result.resultText}`);
-    for (const path of ["/assistant", "/", "/transactions", "/accounts", "/activity", "/bills", "/plan"]) revalidatePath(path);
+    for (const path of ["/assistant", "/", "/transactions", "/accounts", "/activity", "/bills", "/plan", "/categories"]) revalidatePath(path);
     return { nonce: Date.now() };
   } catch (error) {
     revalidatePath("/assistant");
