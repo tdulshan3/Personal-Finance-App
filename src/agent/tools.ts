@@ -1,8 +1,11 @@
+import { accountNamesFor } from "../app/transactions/ledger-rows.ts";
 import type { Db } from "../core/data/driver.ts";
 import { asNumber } from "../core/data/driver.ts";
 import { FinanceError, validationError } from "../core/domain/errors.ts";
-import { formatMoney } from "../core/domain/money.ts";
-import { addDays, localDateOf } from "../core/domain/time.ts";
+import type { Money } from "../core/domain/money.ts";
+import { formatMoney, money, requireCurrency } from "../core/domain/money.ts";
+import { localDateOf } from "../core/domain/time.ts";
+import { createDashboardService } from "../core/services/dashboard-service.ts";
 import type { FinanceService } from "../core/services/finance-service.ts";
 import { guessCategoryFor } from "./intents.ts";
 import { createPlanningReader } from "./planning.ts";
@@ -53,25 +56,40 @@ const AMOUNT = {
 };
 
 const READ_TOOLS: readonly ToolDefinition[] = [
-  { name: "list_accounts", description: "All of the owner's accounts with id, type, currency and current balance. Call this before anything that needs an account_id.", parameters: obj({}) },
+  { name: "list_accounts", description: "All of the owner's visible accounts with id, type, currency and current balance, plus available_to_spend and total_owed_on_cards. Call this before anything that needs an account_id.", parameters: obj({}) },
   { name: "list_categories", description: "All categories with their ids.", parameters: obj({}) },
   {
     name: "search_transactions",
-    description: "Find recorded transactions, newest first. All filters are optional. Returns at most 25.",
+    description: "Find recorded transactions and exact totals matching filters. All filters are optional. Use sort='largest' for biggest expenses/transactions, or text to check if a bill or merchant was paid.",
     parameters: obj({
-      from: DATE, to: DATE,
-      account_id: { type: "string" }, category_id: { type: "string" },
+      from: DATE,
+      to: DATE,
+      account_id: { type: "string", description: "Account id or exact account name" },
+      category_id: { type: "string", description: "Category id or exact category name" },
+      kind: { type: "string", enum: ["expense", "income", "refund", "transfer"], description: "Filter by transaction type." },
       text: { type: "string", description: "Matches merchant name or notes" },
+      sort: { type: "string", enum: ["newest", "largest"], description: "Use 'largest' for biggest expenses/transactions, 'newest' (default) for recent." },
       limit: { type: "integer", minimum: 1, maximum: 25 },
     }),
   },
   {
     name: "get_spending_summary",
-    description: "Net spending per category between two local dates (inclusive), computed by the ledger. Transfers and card payments are not spending and are excluded.",
-    parameters: obj({ from: DATE, to: DATE }, ["from", "to"]),
+    description: "Net spending per category and top merchants between two local dates (inclusive), computed by the ledger. Defaults to this month if dates are omitted. Transfers and card payments are not spending and are excluded.",
+    parameters: obj({
+      from: { type: "string", description: "Start date YYYY-MM-DD (defaults to first day of this month)" },
+      to: { type: "string", description: "End date YYYY-MM-DD (defaults to today)" },
+    }),
+  },
+  {
+    name: "get_cashflow_summary",
+    description: "Total income, total spending, net cashflow (income minus spending), income by category, spending by category, and top merchants between two local dates (inclusive). Use this for income, net savings, or comparing income vs spending. Defaults to this month if dates are omitted. Transfers and card payments are excluded.",
+    parameters: obj({
+      from: { type: "string", description: "Start date YYYY-MM-DD (defaults to first day of this month)" },
+      to: { type: "string", description: "End date YYYY-MM-DD (defaults to today)" },
+    }),
   },
   { name: "get_review_items", description: "How many bank messages are waiting for the owner's review, with a short summary of each.", parameters: obj({}) },
-  { name: "get_upcoming_bills", description: "Saved bills, expected income and card payments with their due dates and whether this month's is paid, upcoming or overdue.", parameters: obj({}) },
+  { name: "get_upcoming_bills", description: "Saved recurring bills, expected income and credit card due dates for this month. Only covers saved recurring items; to check whether a specific bill (like electricity or water) was paid, also call search_transactions.", parameters: obj({}) },
   { name: "get_budgets", description: "This month's budget per category: limit, spent, remaining, percent used, projected month end, status.", parameters: obj({}) },
   { name: "get_cash_forecast", description: "The Plan screen's projection of spendable cash to the end of next month: spendable now, month-end (base and cautious), lowest point, buffer, how much could be set aside. Use it for 'how much can I save', 'will I run out'.", parameters: obj({}) },
   { name: "get_savings_goals", description: "Savings goals with saved, target, percent, target date and the monthly amount still needed.", parameters: obj({}) },
@@ -150,66 +168,227 @@ export function createToolExecutor(deps: {
     const value = args[key];
     return typeof value === "string" && value.trim() ? value.trim().slice(0, 100) : undefined;
   };
+  const optInt = (args: Record<string, unknown>, key: string, fallback: number, min: number, max: number): number => {
+    const value = args[key];
+    let parsed: number | undefined;
+    if (typeof value === "number" && Number.isFinite(value)) parsed = Math.trunc(value);
+    else if (typeof value === "string" && /^\d+$/.test(value.trim())) parsed = Number(value.trim());
+    if (parsed === undefined) return fallback;
+    return Math.min(Math.max(parsed, min), max);
+  };
+  const monthStart = (date: string): string => `${date.slice(0, 8)}01`;
+  const resolveAccountId = (raw: string, includeArchived = false): string => {
+    const trimmed = raw.trim();
+    if (service.findAccount(trimmed)) return trimmed;
+    const matches = service
+      .listAccounts({ includeArchived })
+      .filter((a) => a.isUserVisible && (includeArchived || a.archivedAt === undefined) && a.name.toLowerCase() === trimmed.toLowerCase());
+    return matches.length === 1 ? matches[0]!.id : trimmed;
+  };
+  const resolveCategoryId = (raw: string, includeArchived = false): string => {
+    const trimmed = raw.trim();
+    const cats = service.listCategories(includeArchived);
+    if (cats.some((c) => c.id === trimmed)) return trimmed;
+    const matches = cats.filter((c) => c.name.toLowerCase() === trimmed.toLowerCase());
+    return matches.length === 1 ? matches[0]!.id : trimmed;
+  };
+  const coerceAmount = (raw: unknown): unknown =>
+    typeof raw === "number" && Number.isFinite(raw) ? String(raw) : raw;
+  const formatTotalsMap = (map: Map<string, Money>, empty = "0"): string =>
+    map.size === 0 ? empty : [...map.values()].map((m) => formatMoney(m)).join(" + ");
 
   function run(name: string, args: Record<string, unknown>): ToolOutcome {
     switch (name) {
-      case "list_accounts":
-        return {
-          result: service.accountBalances().map(({ account, balance, available }) => ({
+      case "list_accounts": {
+        const accounts = service
+          .accountBalances()
+          .filter(({ account }) => account.isUserVisible)
+          .map(({ account, balance, available }) => ({
             account_id: account.id,
             name: account.name,
             type: account.type,
             currency: account.currency.code,
             // A card's figure is what is owed; say so rather than leave the sign to interpretation.
             ...(account.kind === "liability"
-              ? { balance_owed: formatMoney(balance), ...(available ? { available_credit: formatMoney(available) } : {}) }
+              ? {
+                  ...(balance.minor < 0n
+                    ? { in_credit: formatMoney(money(balance.currency, -balance.minor)) }
+                    : { balance_owed: formatMoney(balance) }),
+                  ...(available ? { available_credit: formatMoney(available) } : {}),
+                }
               : { balance: formatMoney(balance) }),
-          })),
+          }));
+        const totals = service.homeTotals();
+        const owed = new Map<string, Money>();
+        for (const [code, amount] of totals.owed) {
+          owed.set(code, amount.minor < 0n ? money(amount.currency, 0n) : amount);
+        }
+        return {
+          result: {
+            accounts,
+            available_to_spend: formatTotalsMap(totals.liquid),
+            total_owed_on_cards: formatTotalsMap(owed),
+          },
         };
+      }
 
       case "list_categories":
         return { result: service.listCategories().map((c) => ({ category_id: c.id, name: c.name })) };
 
       case "search_transactions": {
-        const limit = typeof args.limit === "number" ? Math.min(Math.max(Math.trunc(args.limit), 1), 25) : 15;
-        const names = new Map(service.listCategories(true).map((c) => [c.id, c.name]));
-        const rows = service.searchTransactions({
-          from: optDate(args, "from"), to: optDate(args, "to"),
-          accountId: optText(args, "account_id"), categoryId: optText(args, "category_id"),
-          text: optText(args, "text"), limit,
-        });
+        const limit = optInt(args, "limit", 15, 1, 25);
+        const rawAccount = optText(args, "account_id");
+        const accountId = rawAccount ? resolveAccountId(rawAccount, true) : undefined;
+        if (accountId && !service.findAccount(accountId)) {
+          throw validationError(`Unknown account '${rawAccount}'. Call list_accounts.`);
+        }
+        const rawCategory = optText(args, "category_id");
+        const categoryId = rawCategory ? resolveCategoryId(rawCategory, true) : undefined;
+        const cats = service.listCategories(true);
+        if (categoryId && !cats.some((c) => c.id === categoryId)) {
+          throw validationError(`Unknown category '${rawCategory}'. Call list_categories.`);
+        }
+        const kind = optText(args, "kind");
+        if (kind !== undefined && !["expense", "income", "refund", "transfer"].includes(kind)) {
+          throw validationError("'kind' must be expense, income, refund or transfer");
+        }
+        const rawSort = optText(args, "sort");
+        if (rawSort !== undefined && rawSort !== "newest" && rawSort !== "largest") {
+          throw validationError("'sort' must be 'newest' or 'largest'");
+        }
+        const sort: "newest" | "largest" = rawSort === "largest" ? "largest" : "newest";
+
+        const filters = {
+          from: optDate(args, "from"),
+          to: optDate(args, "to"),
+          accountId,
+          categoryId,
+          kind,
+          sort,
+          text: optText(args, "text"),
+        };
+        const allRows: ReturnType<FinanceService["searchTransactions"]> = [];
+        for (let offset = 0; ; offset += 200) {
+          const page = service.searchTransactions({ ...filters, limit: 200, offset });
+          allRows.push(...page);
+          if (page.length < 200) break;
+        }
+        const shown = allRows.slice(0, limit);
+        const names = new Map(cats.map((c) => [c.id, c.name]));
+        const accountNames = accountNamesFor(db, shown);
+
+        const byKindAndCurrency = new Map<string, Map<string, Money>>();
+        for (const row of allRows) {
+          const curMap = byKindAndCurrency.get(row.kind) ?? new Map<string, Money>();
+          const prev = curMap.get(row.amount.currency.code);
+          curMap.set(row.amount.currency.code, money(row.amount.currency, (prev?.minor ?? 0n) + row.amount.minor));
+          byKindAndCurrency.set(row.kind, curMap);
+        }
+        const totalsByKind: Record<string, string> = {};
+        for (const [rowKind, curMap] of byKindAndCurrency) {
+          totalsByKind[rowKind] = formatTotalsMap(curMap);
+        }
+
         return {
           result: {
-            count: rows.length,
-            transactions: rows.map((t) => ({
-              transaction_id: t.id, kind: t.kind, date: t.occurredLocalDate, amount: formatMoney(t.amount),
-              merchant: clip(t.merchantName), category: t.categoryId ? (names.get(t.categoryId) ?? t.categoryId) : null,
+            total_matches: allRows.length,
+            returned: shown.length,
+            truncated: allRows.length > shown.length,
+            totals_by_kind: totalsByKind,
+            transactions: shown.map((t) => ({
+              transaction_id: t.id,
+              kind: t.kind,
+              date: t.occurredLocalDate,
+              amount: formatMoney(t.amount),
+              account: accountNames.get(t.id) ?? null,
+              merchant: clip(t.merchantName),
+              category: t.categoryId ? (names.get(t.categoryId) ?? t.categoryId) : null,
+              ...(t.notes ? { notes: clip(t.notes) } : {}),
             })),
           },
         };
       }
 
       case "get_spending_summary": {
-        const from = optDate(args, "from") ?? addDays(today(), -30);
+        const from = optDate(args, "from") ?? monthStart(today());
         const to = optDate(args, "to") ?? today();
         if (from > to) throw validationError("'from' must not be after 'to'");
         const names = new Map(service.listCategories(true).map((c) => [c.id, c.name]));
         const rows = service.spendingByCategory(from, to);
-        const totals = new Map<string, bigint>();
-        for (const row of rows) totals.set(row.amount.currency.code, (totals.get(row.amount.currency.code) ?? 0n) + row.amount.minor);
+        const totals = new Map<string, Money>();
+        const currencies = new Map<string, Money["currency"]>();
+        for (const row of rows) {
+          const code = row.amount.currency.code;
+          currencies.set(code, row.amount.currency);
+          const prev = totals.get(code);
+          totals.set(code, money(row.amount.currency, (prev?.minor ?? 0n) + row.amount.minor));
+        }
+        const dashboard = createDashboardService({ db });
+        const topMerchants = [...currencies.values()].flatMap((currency) =>
+          dashboard.topMerchants(currency, from, to, 8).map((m) => ({
+            merchant: m.merchant,
+            amount: formatMoney(m.amount),
+            count: m.times,
+          })),
+        );
         return {
           result: {
-            from, to,
+            from,
+            to,
             by_category: rows.map((r) => ({ category: names.get(r.categoryId) ?? r.categoryId, amount: formatMoney(r.amount) })),
+            top_merchants: topMerchants,
             // Summed here, by the engine, so the model never has to add money itself (§1.1).
-            total: rows.length === 0 ? "0" : [...new Set(rows.map((r) => r.amount.currency))].map((currency) =>
-              formatMoney({ currency, minor: totals.get(currency.code) ?? 0n })).join(" + "),
+            total: formatTotalsMap(totals),
+          },
+        };
+      }
+
+      case "get_cashflow_summary": {
+        const from = optDate(args, "from") ?? monthStart(today());
+        const to = optDate(args, "to") ?? today();
+        if (from > to) throw validationError("'from' must not be after 'to'");
+        const dashboard = createDashboardService({ db });
+        const names = new Map(service.listCategories(true).map((c) => [c.id, c.name]));
+        const currencyCodes = new Set([
+          ...service.listAccounts().filter((a) => a.isUserVisible).map((a) => a.currency.code),
+          ...dashboard.activeCurrencies(),
+        ]);
+        const byCurrency = [...currencyCodes].map((code) => {
+          const currency = requireCurrency(code);
+          const flow = dashboard.totals(currency, from, to);
+          return {
+            currency: code,
+            income: formatMoney(flow.income),
+            spending: formatMoney(flow.spending),
+            net: formatMoney(flow.net),
+            income_by_category: dashboard
+              .byCategory(currency, from, to, "income")
+              .map((r) => ({ category: names.get(r.categoryId) ?? r.categoryId, amount: formatMoney(r.amount) })),
+            spending_by_category: dashboard
+              .byCategory(currency, from, to, "expense")
+              .map((r) => ({ category: names.get(r.categoryId) ?? r.categoryId, amount: formatMoney(r.amount) })),
+            top_merchants: dashboard
+              .topMerchants(currency, from, to, 8)
+              .map((m) => ({ merchant: m.merchant, amount: formatMoney(m.amount), count: m.times })),
+          };
+        });
+        return {
+          result: {
+            from,
+            to,
+            by_currency: byCurrency,
+            note: "Transfers and card payments are excluded from income and spending.",
           },
         };
       }
 
       case "get_upcoming_bills":
-        return { result: { bills: planning.bills() } };
+        return {
+          result: {
+            bills: planning.bills(),
+            note: "Lists saved recurring schedules and cards only. To verify if a specific bill or merchant was paid, also call search_transactions.",
+          },
+        };
       case "get_budgets":
         return { result: { budgets: planning.budgets() } };
       case "get_cash_forecast":
@@ -243,12 +422,22 @@ export function createToolExecutor(deps: {
           // Enforced here, not just requested in the prompt: small models draft from "around 400".
           return { result: { error: "The owner gave an estimate, not an exact amount. Do not propose. Ask them for the exact amount." } };
         }
-        if (name === "propose_transaction" && (!args.category_id || args.category_id === "uncategorized")) {
-          const kind = args.kind === "income" || args.kind === "refund" ? args.kind : "expense";
-          const hint = [args.merchant, args.notes].filter((v): v is string => typeof v === "string").join(" ");
-          if (hint) args = { ...args, category_id: guessCategoryFor(db, hint, kind) };
+        const normalized: Record<string, unknown> = { ...args };
+        if (name === "propose_transaction") {
+          normalized.amount = coerceAmount(normalized.amount);
+          if (typeof normalized.account_id === "string") normalized.account_id = resolveAccountId(normalized.account_id);
+          if (typeof normalized.category_id === "string") normalized.category_id = resolveCategoryId(normalized.category_id);
+          if (!normalized.category_id || normalized.category_id === "uncategorized") {
+            const kind = normalized.kind === "income" || normalized.kind === "refund" ? normalized.kind : "expense";
+            const hint = [normalized.merchant, normalized.notes].filter((v): v is string => typeof v === "string").join(" ");
+            if (hint) normalized.category_id = guessCategoryFor(db, hint, kind);
+          }
+        } else if (name === "propose_transfer") {
+          normalized.amount = coerceAmount(normalized.amount);
+          if (typeof normalized.from_account_id === "string") normalized.from_account_id = resolveAccountId(normalized.from_account_id);
+          if (typeof normalized.to_account_id === "string") normalized.to_account_id = resolveAccountId(normalized.to_account_id);
         }
-        const proposal = proposals.createProposal({ actionType, args, sessionId: deps.sessionId, model: deps.model });
+        const proposal = proposals.createProposal({ actionType, args: normalized, sessionId: deps.sessionId, model: deps.model });
         return {
           proposalId: proposal.id,
           result: {

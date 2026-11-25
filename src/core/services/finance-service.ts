@@ -643,6 +643,8 @@ export function createFinanceService(options: FinanceServiceOptions) {
     accountId?: string | undefined;
     categoryId?: string | undefined;
     text?: string | undefined;
+    kind?: string | undefined;
+    sort?: "newest" | "largest" | undefined;
     status?: TransactionStatus | undefined;
     includeHistoryOnly?: boolean;
     limit?: number;
@@ -666,6 +668,10 @@ export function createFinanceService(options: FinanceServiceOptions) {
       where.push("r.occurred_local_date <= ?");
       params.push(filters.to);
     }
+    if (filters.kind) {
+      where.push("t.kind = ?");
+      params.push(filters.kind);
+    }
     if (filters.categoryId) {
       where.push("r.category_id = ?");
       params.push(filters.categoryId);
@@ -674,7 +680,13 @@ export function createFinanceService(options: FinanceServiceOptions) {
       where.push(
         `EXISTS (SELECT 1 FROM journal_entries e
                    JOIN journals j ON j.id = e.journal_id
-                  WHERE j.transaction_id = t.id AND e.ledger_account_id = ?)`,
+                  WHERE j.id = COALESCE(
+                          r.journal_id,
+                          (SELECT j2.reverses_journal_id FROM journals j2
+                            WHERE j2.transaction_id = t.id AND j2.purpose = 'deletion_reversal'
+                            ORDER BY j2.recorded_at DESC LIMIT 1))
+                    AND j.state = 'posted'
+                    AND e.ledger_account_id = ?)`,
       );
       params.push(filters.accountId);
     }
@@ -684,6 +696,11 @@ export function createFinanceService(options: FinanceServiceOptions) {
       params.push(pattern, pattern);
     }
 
+    const orderBy =
+      filters.sort === "largest"
+        ? "r.display_amount_minor DESC, r.occurred_at DESC, t.id DESC"
+        : "r.occurred_at DESC, t.created_at DESC, t.id DESC";
+
     const rows = db
       .prepare(
         `SELECT t.id, t.kind, t.status, t.accounting_scope, t.current_revision,
@@ -692,7 +709,7 @@ export function createFinanceService(options: FinanceServiceOptions) {
            FROM transactions t
            JOIN transaction_revisions r ON r.transaction_id = t.id
           WHERE ${where.join(" AND ")}
-          ORDER BY r.occurred_at DESC, t.created_at DESC, t.id DESC
+          ORDER BY ${orderBy}
           LIMIT ? OFFSET ?`,
       )
       .all(...params, limit, offset) as Record<string, unknown>[];

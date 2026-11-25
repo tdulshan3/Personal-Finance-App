@@ -57,14 +57,29 @@ function parseArguments(raw: unknown): Record<string, unknown> {
   return record(raw) ?? {};
 }
 
+function parseXmlParamValue(raw: string): unknown {
+  const trimmed = raw.trim();
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return trimmed;
+    }
+  }
+  return trimmed;
+}
+
 /**
  * Small models sometimes write the call into the text instead of the structured field. Qwen's
- * template uses `<tool_call>{...}</tool_call>`; recognise exactly that and nothing looser, so
- * ordinary prose that happens to contain JSON is never executed.
+ * template uses `<tool_call>{...}</tool_call>`, while MiniCPM uses
+ * `<function name="..."><param name="...">...</param></function>`; recognise only those exact
+ * forms for known tools so ordinary prose that happens to contain JSON or HTML is never executed.
  */
 function toolCallsFromText(content: string, known: ReadonlySet<string>): { calls: ToolCall[]; rest: string } {
   const calls: ToolCall[] = [];
-  const rest = content.replace(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g, (whole, json: string) => {
+  let rest = content.replace(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g, (whole, json: string) => {
     try {
       const parsed = record(JSON.parse(json));
       const name = parsed && typeof parsed.name === "string" ? parsed.name : null;
@@ -77,11 +92,29 @@ function toolCallsFromText(content: string, known: ReadonlySet<string>): { calls
     }
     return whole;
   });
+
+  rest = rest.replace(/<function\s+name="([^"]+)">([\s\S]*?)<\/function>/g, (whole, name: string, body: string) => {
+    if (!known.has(name)) return whole;
+    const args: Record<string, unknown> = {};
+    for (const match of body.matchAll(/<param\s+name="([^"]+)">(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/param>/g)) {
+      const paramName = match[1];
+      if (!paramName) continue;
+      args[paramName] = parseXmlParamValue(match[2] ?? match[3] ?? "");
+    }
+    calls.push({ id: `text_${calls.length}`, name, arguments: args });
+    return "";
+  });
+
   return { calls, rest: rest.trim() };
 }
 
 /** Thinking models may leak their scratchpad; the owner should never see it (§14.1). */
-const stripThinking = (text: string) => text.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/^[\s\S]*?<\/think>/, "").trim();
+const stripThinking = (text: string) =>
+  text
+    .replace(/<think>[\s\S]*?<\/think>/g, "")
+    .replace(/^[\s\S]*?<\/think>/, "")
+    .replace(/<think>[\s\S]*$/, "")
+    .trim();
 
 export function createChatClient(endpoint: AgentEndpoint, options: { fetchImpl?: FetchLike } = {}) {
   const basePath = new URL(endpoint.baseUrl).pathname.replace(/\/+$/, "");
@@ -113,7 +146,7 @@ export function createChatClient(endpoint: AgentEndpoint, options: { fetchImpl?:
           content: turn.content,
           tool_calls: turn.toolCalls.map((call) =>
             isOllama
-              ? { function: { name: call.name, arguments: call.arguments } }
+              ? { id: call.id, function: { name: call.name, arguments: call.arguments } }
               : { id: call.id, type: "function", function: { name: call.name, arguments: JSON.stringify(call.arguments) } },
           ),
         };
